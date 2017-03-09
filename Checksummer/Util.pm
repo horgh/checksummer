@@ -118,7 +118,7 @@ sub debug {
 	}
 
 	if (!$DEBUG && $level eq 'debug') {
-			return;
+		return;
 	}
 
 	chomp $msg;
@@ -127,12 +127,17 @@ sub debug {
 		$caller = (caller(2))[3];
 	}
 
-	my $output = "$caller: $msg";
-
-	if ($level =~ /error/i) {
-			&stderr($output);
+	my $output;
+	if ($DEBUG) {
+		$output = "$caller: $msg";
 	} else {
-			&stdout($output);
+		$output = "$msg";
+	}
+
+	if ($level eq 'error') {
+		&stderr($output);
+	} else {
+		&stdout($output);
 	}
 }
 
