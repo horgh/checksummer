@@ -38,6 +38,10 @@ sub main {
 sub test_checksummer {
   my $failures = 0;
 
+  if (!&test_read_config) {
+    $failures++;
+  }
+
   if (!&test_check_file) {
     $failures++;
   }
@@ -51,6 +55,164 @@ sub test_checksummer {
   }
 
   return $failures == 0;
+}
+
+sub test_read_config {
+  my @tests = (
+    # A config with a path that does not exist.
+    {
+      config => "
+/dir1
+",
+      want_error => 1,
+      paths      => [],
+      exclusions => [],
+    },
+
+    # A config with paths that do exist and are absolute, and exclusions
+    # that are absolute.
+    {
+      config => "
+# Nice dir
+/tmp
+
+/home
+
+!/home/horgh
+!/home/tester
+",
+      want_error => 0,
+      paths      => ['/tmp', '/home',],
+      exclusions => ['/home/horgh', '/home/tester',],
+    },
+
+    # A config with paths that are not absolute.
+    {
+      config => "
+# Nice dir
+./tmp
+
+/home
+
+!/home/horgh
+!/home/tester
+",
+      want_error => 1,
+      paths      => [],
+      exclusions => [],
+    },
+
+    # A config where paths are absolute, but exclusions are not.
+    {
+      config => "
+# Nice dir
+/tmp
+
+/home
+
+!./home/horgh
+!./home/tester
+",
+      want_error => 1,
+      paths      => [],
+      exclusions => [],
+    },
+
+    # A config where one of the paths is a regular file.
+    {
+      config => "
+/etc/passwd
+
+/home
+
+!/home/horgh
+!/home/tester
+",
+      want_error => 1,
+      paths      => [],
+      exclusions => [],
+    },
+  );
+
+  my $tmpfile = File::Temp::tmpnam();
+
+  my $failures = 0;
+
+  TEST: foreach my $test (@tests) {
+    if (!&write_file($tmpfile, $test->{ config })) {
+      print "test_read_config: Unable to write file: $tmpfile\n";
+      $failures++;
+      next;
+    }
+
+    my $config = Checksummer::read_config($tmpfile);
+    unlink $tmpfile;
+
+    if ($test->{ want_error }) {
+      if ($config) {
+        print "read_config() succeeded, wanted error.\n";
+        print "config = $test->{ config }\n";
+        $failures++;
+        next;
+      }
+
+      next;
+    }
+
+    if (!$config) {
+      print "read_config() failed, wanted success\n";
+      print "config = $test->{ config }\n";
+      $failures++;
+      next;
+    }
+
+    if (scalar @{ $config->{ paths } } != scalar @{ $test->{ paths } }) {
+      print "read_config() yielded " . scalar(@{ $config->{ paths } })
+        . " paths, wanted " . scalar(@{ $test->{ paths } }) . "\n";
+      print "config = $test->{ config }\n";
+      $failures++;
+      next;
+    }
+
+    for (my $i = 0; $i < scalar @{ $test->{ paths } }; $i++) {
+      my $wanted_path = $test->{ paths }[ $i ];
+      my $got_path = $config->{ paths }[ $i ];
+
+      if ($wanted_path ne $got_path) {
+        print "read_config() path mismatch. path $i is $got_path, wanted $wanted_path\n";
+        print "config = $test->{ config }\n";
+        $failures++;
+        next TEST;
+      }
+    }
+
+    if (scalar @{ $config->{ exclusions } } != scalar @{ $test->{ exclusions } }) {
+      print "read_config() yielded " . scalar(@{ $config->{ exclusions } })
+        . " exclusions, wanted " . scalar(@{ $test->{ exclusions } }) . "\n";
+      print "config = $test->{ config }\n";
+      $failures++;
+      next;
+    }
+
+    for (my $i = 0; $i < scalar @{ $test->{ exclusions } }; $i++) {
+      my $wanted = $test->{ exclusions }[ $i ];
+      my $got = $config->{ exclusions }[ $i ];
+
+      if ($wanted ne $got) {
+        print "read_config() exclusion mismatch. exclusion $i is $got, wanted $wanted\n";
+        print "config = $test->{ config }\n";
+        $failures++;
+        next TEST;
+      }
+    }
+  }
+
+  if ($failures == 0) {
+    return 1;
+  }
+
+  print "test_read_config: $failures/" . scalar(@tests) . " failed\n";
+  return 0;
 }
 
 sub test_check_file {
@@ -74,8 +236,8 @@ sub test_check_file {
       ],
       db_checksums => {},
       exclusions   => [],
-      want_error  => 0,
-      output      => [],
+      want_error   => 0,
+      output       => [],
     },
 
     # Regular file. Checksums match.
@@ -95,9 +257,9 @@ sub test_check_file {
         # checksum of 123
         '/test.txt' => '202cb962ac59075b964b07152d234b70',
       },
-      exclusions   => [],
-      want_error  => 0,
-      output      => [],
+      exclusions => [],
+      want_error => 0,
+      output     => [],
     },
 
     # Regular file. Checksum is not yet in the database.
@@ -115,9 +277,9 @@ sub test_check_file {
       ],
       db_checksums => {
       },
-      exclusions   => [],
-      want_error  => 0,
-      output      => [
+      exclusions => [],
+      want_error => 0,
+      output     => [
         {
           file     => '/test.txt',
           checksum => '202cb962ac59075b964b07152d234b70',
@@ -142,9 +304,9 @@ sub test_check_file {
       db_checksums => {
         '/test.txt' => 'ff',
       },
-      exclusions   => [],
-      want_error  => 0,
-      output      => [
+      exclusions => [],
+      want_error => 0,
+      output     => [
         {
           file     => '/test.txt',
           checksum => '202cb962ac59075b964b07152d234b70',
@@ -170,9 +332,9 @@ sub test_check_file {
       db_checksums => {
         '/test.txt' => 'ff',
       },
-      exclusions   => [],
-      want_error  => 0,
-      output      => [
+      exclusions => [],
+      want_error => 0,
+      output     => [
         {
           file     => '/test.txt',
           checksum => '202cb962ac59075b964b07152d234b70',
@@ -210,9 +372,9 @@ sub test_check_file {
         '/testdir/test.txt'  => '202cb962ac59075b964b07152d234b70',
         '/testdir/test2.txt' => '202cb962ac59075b964b07152d234b70',
       },
-      exclusions   => [],
-      want_error  => 0,
-      output      => [
+      exclusions => [],
+      want_error => 0,
+      output     => [
       ],
     },
 
@@ -252,9 +414,9 @@ sub test_check_file {
         '/testdir/test.txt'  => '202cb962ac59075b964b07152d234b70',
         '/testdir/test2.txt' => '202cb962ac59075b964b07152d234b70',
       },
-      exclusions   => [],
-      want_error  => 0,
-      output      => [
+      exclusions => [],
+      want_error => 0,
+      output     => [
         {
           file     => '/testdir/test3.txt',
           checksum => '202cb962ac59075b964b07152d234b70',
@@ -270,9 +432,9 @@ sub test_check_file {
       file  => '/testdir',
       files => [
         {
-          path    => '/testdir',
-          dir     => 1,
-          exists  => 1,
+          path   => '/testdir',
+          dir    => 1,
+          exists => 1,
         },
         {
           path    => '/testdir/test.txt',
@@ -293,9 +455,9 @@ sub test_check_file {
         '/testdir/test.txt'  => '202cb962ac59075b964b07152d234b70',
         '/testdir/test2.txt' => 'ff',
       },
-      exclusions   => [],
-      want_error  => 0,
-      output      => [
+      exclusions => [],
+      want_error => 0,
+      output     => [
         {
           file     => '/testdir/test2.txt',
           checksum => '202cb962ac59075b964b07152d234b70',
@@ -311,9 +473,9 @@ sub test_check_file {
       file  => '/testdir',
       files => [
         {
-          path    => '/testdir',
-          dir     => 1,
-          exists  => 1,
+          path   => '/testdir',
+          dir    => 1,
+          exists => 1,
         },
         {
           path    => '/testdir/test.txt',
@@ -334,9 +496,9 @@ sub test_check_file {
         '/testdir/test.txt'  => '202cb962ac59075b964b07152d234b70',
         '/testdir/test2.txt' => 'ff',
       },
-      exclusions   => [],
-      want_error  => 0,
-      output      => [
+      exclusions => [],
+      want_error => 0,
+      output     => [
         {
           file     => '/testdir/test2.txt',
           checksum => '202cb962ac59075b964b07152d234b70',
@@ -359,9 +521,9 @@ sub test_check_file {
       ],
       db_checksums => {
       },
-      exclusions   => [],
-      want_error  => 0,
-      output      => [
+      exclusions => [],
+      want_error => 0,
+      output     => [
       ],
     },
 
@@ -372,9 +534,9 @@ sub test_check_file {
       file  => '/testdir',
       files => [
         {
-          path    => '/testdir',
-          dir     => 1,
-          exists  => 1,
+          path   => '/testdir',
+          dir    => 1,
+          exists => 1,
         },
         {
           path    => '/testdir/test.txt',
@@ -395,9 +557,9 @@ sub test_check_file {
         '/testdir/test.txt'  => '202cb962ac59075b964b07152d234b70',
         '/testdir/test2.txt' => 'ff',
       },
-      exclusions  => ['/testdir/test2.txt'],
-      want_error  => 0,
-      output      => [
+      exclusions => ['/testdir/test2.txt'],
+      want_error => 0,
+      output     => [
       ],
     },
   );
@@ -409,16 +571,6 @@ sub test_check_file {
 
   TEST: foreach my $test (@tests) {
     print "test_check_file: Running test $test->{ desc }...\n";
-
-    # Re-create the temporary work directory.
-
-    my $rm_errors;
-    File::Path::remove_tree($working_dir, { error => \$rm_errors });
-    if (@$rm_errors != 0) {
-      print "test_check_file: unable to clean working directory: $working_dir: @$rm_errors\n";
-      $failures++;
-      next;
-    }
 
     if (!mkdir($working_dir)) {
       print "test_check_file: unable to create working directory: $working_dir: $!\n";
@@ -439,6 +591,7 @@ sub test_check_file {
         if (!symlink('/tmp', $path)) {
           print "test_check_file: Unable to symlink: $path\n";
           $failures++;
+          File::Path::remove_tree($working_dir);
           next TEST;
         }
 
@@ -447,8 +600,9 @@ sub test_check_file {
 
       if ($file->{ dir }) {
         if (!mkdir($path)) {
-          print "test_check_file: unable mkdir $path\n";
+          print "test_check_file: Unable to mkdir $path\n";
           $failures++;
+          File::Path::remove_tree($working_dir);
           next TEST;
         }
 
@@ -460,12 +614,14 @@ sub test_check_file {
       if (!&write_file($path, $file->{ content })) {
         print "test_check_file: unable to write file: $path\n";
         $failures++;
+        File::Path::remove_tree($working_dir);
         next TEST;
       }
 
       if (utime($file->{ mtime }, $file->{ mtime }, $path) != 1) {
         print "test_check_file: unable to set mtime: $path\n";
         $failures++;
+        File::Path::remove_tree($working_dir);
         next TEST;
       }
     }
@@ -493,6 +649,7 @@ sub test_check_file {
 
     my $r = Checksummer::check_file($start_file, $hash_method, \@exclusions,
       \%db_checksums);
+    File::Path::remove_tree($working_dir);
 
     if ($test->{ want_error }) {
       if (defined $r) {
@@ -638,21 +795,17 @@ sub test_checksum_mismatch {
       if (utime($test->{ mtime }, $test->{ mtime }, $tmpfile) != 1) {
         print "test_checksum_mismatch: utime failed: $tmpfile\n";
         $failures++;
+        unlink $tmpfile;
         next;
       }
     }
 
     my $r = Checksummer::checksum_mismatch($tmpfile, $new_checksum,
       $old_checksum);
+    unlink $tmpfile if $test->{ file_exists };
+
     if ($r != $test->{ output }) {
       print "checksum_mismatch($tmpfile, ...) = $r, wanted $test->{ output }\n";
-      $failures++;
-      unlink $tmpfile if $test->{ file_exists };
-      next;
-    }
-
-    if ($test->{ file_exists} && !unlink $tmpfile) {
-      print "test_checksum_mismatch: Unable to unlink file: $tmpfile: $!\n";
       $failures++;
       next;
     }
@@ -702,7 +855,6 @@ sub test_util_calculate_checksum {
     if (!&write_file($tmpfile, $test->{ input })) {
       print "test_util_calculate_checksum: Unable to write file\n";
       $failures++;
-      unlink $tmpfile;
       next;
     }
 
@@ -723,23 +875,18 @@ sub test_util_calculate_checksum {
     }
 
     $r = Checksummer::Util::calculate_checksum($tmpfile, 'sha256');
+
+    unlink $tmpfile;
+
     if (!defined $r) {
       print "calculate_checksum($tmpfile, sha256): Unable to calculate checksum\n";
       $failures++;
-      unlink $tmpfile;
       next;
     }
 
     $sum = unpack('H*', $r);
     if ($sum ne $test->{ sha256_hash}) {
       print "calculate_checksum($tmpfile, sha256) = $sum, wanted $test->{ sha256_hash }\n";
-      $failures++;
-      unlink $tmpfile;
-      next;
-    }
-
-    if (!unlink $tmpfile) {
-      print "test_util_calculate_checksum: Unable to unlink: $tmpfile: $!\n";
       $failures++;
       next;
     }

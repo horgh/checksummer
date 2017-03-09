@@ -81,19 +81,71 @@ sub read_config {
 		return undef;
 	}
 
-	return {
+	my %config = (
 		paths      => \@paths,
 		exclusions => \@exclusions,
-	};
+	);
+
+	if (!&is_valid_config(\%config)) {
+		error("Configuration problem");
+		return undef;
+	}
+
+	return \%config;
+}
+
+# Check the configuration values.
+#
+# Each path and each exclusion must be absolute.
+#
+# We check that each path given is a directory.
+sub is_valid_config {
+	my ($config) = @_;
+	if (!$config || !exists $config->{ paths } ||
+		!exists $config->{ exclusions }) {
+		error("Invalid parameter");
+		return 0;
+	}
+
+	# Each path must be absolute, and it must be an existing directory.
+	foreach my $path (@{ $config->{ paths } }) {
+		if (index($path, '/') != 0) {
+			error("Path is not absolute: $path");
+			return 0;
+		}
+
+		if (! -e $path) {
+			error("Path does not exist: $path");
+			return 0;
+		}
+
+		if (! -d $path) {
+			error("Path is not a directory: $path");
+			return 0;
+		}
+	}
+
+	# Each exclusion must be an absolute path. It might not exist.
+	foreach my $exclusion (@{ $config->{ exclusions } }) {
+		if (index($exclusion, '/') != 0) {
+			error("Exclusion is not absolute: $exclusion");
+			return 0;
+		}
+	}
+
+	return 1;
 }
 
 # Check all files.
 #
-# For every path we will recursively descend and perform a checksum upon each
-# file found.
+# For every path we will recursively descend and calculate a checksum for each
+# file.
 #
 # If the file exists in the database, compare the checksum with found checksum.
-# If not match, warn If it does not exist in the database, add it
+#
+# If not match, warn.
+#
+# If it does not exist in the database, add it.
 #
 # Parameters:
 #
@@ -120,21 +172,8 @@ sub check_files {
 	my @new_checksums;
 
 	foreach my $path (@{ $paths }) {
-		# Paths must be absolute
-		if ($path !~ /\//) {
-			error("Invalid path found. Not absolute: $path");
-			return undef;
-		}
-
-		# Must be a directory
-		if (! -e $path || ! -d $path) {
-			error("directory does not exist or is not a directory: $path");
-			return undef;
-		}
-
 		info("Checking [$path]...");
 
-		# Recursively descend and look at each file
 		my $path_checksums = &check_file($path, $hash_method, $exclusions,
 			$db_checksums);
 		if (!$path_checksums) {
@@ -148,8 +187,7 @@ sub check_files {
 	return \@new_checksums;
 }
 
-# Examine each file and compare its checksum as described in the
-# comment of check_files
+# Examine each file and compare its checksum as described by check_files().
 #
 # Parameters:
 #
