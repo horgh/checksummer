@@ -7,7 +7,9 @@ use warnings;
 
 package Checksummer;
 
+use Checksummer::Database qw//;
 use Checksummer::Util qw/info error debug/;
+use DBI qw//;
 use Exporter qw/import/;
 use File::stat qw//;
 
@@ -125,12 +127,79 @@ sub is_valid_config {
 		}
 	}
 
+	if (@{ $config->{ paths } } == 0) {
+		error("No paths provided. You must provide at least one.");
+		return 0;
+	}
+
 	# Each exclusion must be an absolute path. It might not exist.
 	foreach my $exclusion (@{ $config->{ exclusions } }) {
 		if (index($exclusion, '/') != 0) {
 			error("Exclusion is not absolute: $exclusion");
 			return 0;
 		}
+	}
+
+	return 1;
+}
+
+# Run checks using checksums from a database. We create the database if
+# necessary, and update it with any changed or new checksums.
+sub run {
+	my ($db_file, $hash_method, $config) = @_;
+	if (!defined $db_file || length $db_file == 0 ||
+		!defined $hash_method || length $hash_method == 0 ||
+		!$config) {
+		error("Invalid parameter");
+		return 0;
+	}
+
+	my $dbh = DBI->connect("dbi:SQLite:dbname=$db_file", '', '');
+	if (!$dbh) {
+		error($DBI::errstr);
+		return 0;
+	}
+
+	# Use a transaction for faster bulk inserts.
+	if (!$dbh->begin_work) {
+		error("Unable to start transaction: " . $dbh->errstr);
+		return 0;
+	}
+
+	if (!Checksummer::Database::create_schema_if_needed($dbh)) {
+		error("Failed to create database schema.");
+		$dbh->rollback;
+		return 0;
+	}
+
+	info("Loading checksums...");
+
+	my $db_checksums = Checksummer::Database::get_db_checksums($dbh);
+	if (!$db_checksums) {
+		error("Unable to load current checksums.");
+		$dbh->rollback;
+		return 0;
+	}
+
+	info("Checking files...");
+
+	my $new_checksums = Checksummer::check_files($config->{ paths },
+		$hash_method, $config->{ exclusions }, $db_checksums);
+	if (!$new_checksums) {
+		error('Failure performing file checks.');
+		$dbh->rollback;
+		return 0;
+	}
+
+	if (!Checksummer::Database::db_updates($dbh, $db_checksums, $new_checksums)) {
+		error("Unable to perform database updates.");
+		$dbh->rollback;
+		return 0;
+	}
+
+	if (!$dbh->commit) {
+		error("Unable to commit transaction: " . $dbh->errstr);
+		return 0;
 	}
 
 	return 1;
@@ -146,6 +215,9 @@ sub is_valid_config {
 # If not match, warn.
 #
 # If it does not exist in the database, add it.
+#
+# This function is mainly a wrapper around check_file(). It exists mainly to
+# be able to log a little differently for the top level paths.
 #
 # Parameters:
 #

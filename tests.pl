@@ -132,6 +132,17 @@ sub test_read_config {
       paths      => [],
       exclusions => [],
     },
+
+    # No paths at all.
+    {
+      config => "
+!/home/horgh
+!/home/tester
+",
+      want_error => 1,
+      paths      => [],
+      exclusions => [],
+    },
   );
 
   my $tmpfile = File::Temp::tmpnam();

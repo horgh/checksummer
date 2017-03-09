@@ -16,9 +16,7 @@ use strict;
 use warnings;
 
 use Checksummer qw//;
-use Checksummer::Database qw//;
 use Checksummer::Util qw/info error/;
-use DBI qw//;
 use Getopt::Std qw//;
 
 $| = 1;
@@ -34,79 +32,31 @@ sub main {
 
 	Checksummer::Util::set_debug($args->{ debug });
 
-	my $start = time;
-
-	my $dbh = DBI->connect('dbi:SQLite:dbname=' . $args->{ dbfile }, '', '');
-	if (!$dbh) {
-		error($DBI::errstr);
-		return 0;
-	}
-
-	# Use a transaction for faster bulk inserts.
-	if (!$dbh->begin_work) {
-		error("Unable to start transaction: " . $dbh->errstr);
-		return 0;
-	}
-
-	if (!Checksummer::Database::create_schema_if_needed($dbh)) {
-		error("Failed to create database schema.");
-		$dbh->rollback;
-		return 0;
-	}
-
 	my $config = Checksummer::read_config($args->{ config });
 	if (!$config) {
 		error('Failure reading config.');
-		$dbh->rollback;
 		return 0;
 	}
 
-	if (!@{ $config->{ paths }}) {
-		error('No paths found to checksum.');
-		$dbh->rollback;
-		return 0;
-	}
+	my $start = time;
 
-	info("Loading checksums...");
-
-	my $db_checksums = Checksummer::Database::get_db_checksums($dbh);
-	if (!$db_checksums) {
-		error("Unable to load current checksums.");
-		$dbh->rollback;
-		return 0;
-	}
-
-	info("Checking files...");
-
-	my $new_checksums = Checksummer::check_files($config->{ paths },
-		$args->{ method }, $config->{ exclusions }, $db_checksums);
-	if (!$new_checksums) {
-		error('Failure performing file checks.');
-		$dbh->rollback;
-		return 0;
-	}
-
-	if (!Checksummer::Database::db_updates($dbh, $db_checksums, $new_checksums)) {
-		error("Unable to perform database updates.");
-		$dbh->rollback;
-		return 0;
-	}
-
-	if (!$dbh->commit) {
-		error("Unable to commit transaction: " . $dbh->errstr);
+	if (!Checksummer::run($args->{ db_file }, $args->{ hash_method }, $config)) {
+		error("Failure running checks.");
 		return 0;
 	}
 
 	my $end = time;
-	my $seconds = $end - $start;
 
-	my $minutes = $seconds/60;
-	my $hours = int($minutes/60);
+	my $runtime_in_seconds = $end - $start;
 
-	$minutes = $minutes%60;
-	$seconds = $seconds%60;
+	my $runtime_in_minutes = $runtime_in_seconds/60;
 
-	info("Finished. Runtime: ${hours}h${minutes}m${seconds}s.");
+	my $runtime_in_hours = int($runtime_in_minutes/60);
+
+	$runtime_in_minutes = $runtime_in_minutes%60;
+	$runtime_in_seconds = $runtime_in_seconds%60;
+
+	info("Finished. Runtime: ${runtime_in_hours}h${runtime_in_minutes}m${runtime_in_seconds}s.");
 	return 1;
 }
 
@@ -128,7 +78,7 @@ sub _get_args {
 		&_print_usage;
 		return undef;
 	}
-	my $dbfile = $args{ d };
+	my $db_file = $args{ d };
 
 	if (!exists $args{ c } ||
 		length $args{ c } == 0) {
@@ -143,9 +93,9 @@ sub _get_args {
 		&_print_usage;
 		return undef;
 	}
-	my $method = $args{ m };
+	my $hash_method = $args{ m };
 
-	if ($method ne 'sha256' && $method ne 'md5') {
+	if ($hash_method ne 'sha256' && $hash_method ne 'md5') {
 		error("Please select 'sha256' or 'md5' hash method.");
 		&_print_usage;
 		return undef;
@@ -157,10 +107,10 @@ sub _get_args {
 	}
 
 	return {
-		dbfile => $dbfile,
-		config => $config,
-		method => $method,
-		debug	 => $debug,
+		db_file     => $db_file,
+		config      => $config,
+		hash_method => $hash_method,
+		debug	      => $debug,
 	};
 }
 
