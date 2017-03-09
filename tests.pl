@@ -601,7 +601,7 @@ sub test_check_file {
 
   my $failures = 0;
 
-  TEST: foreach my $test (@tests) {
+  foreach my $test (@tests) {
     print "test_check_file: Running test $test->{ desc }...\n";
 
     if (!&populate_directory($working_dir, $test->{ files })) {
@@ -651,38 +651,10 @@ sub test_check_file {
       next;
     }
 
-    if (@{ $r } != @{ $test->{ output } }) {
-      print "test_check_file: got " . scalar(@$r) . " checksums, wanted " . scalar(@{ $test->{ output }}) . "\n";
+    if (!&checksums_are_equal($working_dir, $test->{ output }, $r)) {
+      print "test_check_file: returned checksums are not as expected\n";
       $failures++;
       next;
-    }
-
-    # Compare the checksums we received (remember, only those files changed or
-    # are new are returned) with what we expected to be returned.
-
-    for (my $i = 0; $i < @{ $r }; $i++) {
-      my $got = $r->[ $i ];
-      my $wanted = $test->{ output }[ $i ];
-
-      my $wanted_file = $working_dir . $wanted->{ file };
-      if ($got->{ file } ne $wanted_file) {
-        print "test_check_file: file $i file is $got->{ file }, wanted $wanted_file\n";
-        $failures++;
-        next TEST;
-      }
-
-      my $got_sum = unpack('H*', $got->{ checksum });
-      if ($got_sum ne $wanted->{ checksum }) {
-        print "test_check_file: file $i checksum is $got_sum, wanted $wanted->{ checksum }\n";
-        $failures++;
-        next TEST;
-      }
-
-      if ($got->{ ok } != $wanted->{ ok }) {
-        print "test_check_file: file $i ok is $got->{ ok }, wanted $wanted->{ ok }\n";
-        $failures++;
-        next TEST;
-      }
     }
   }
 
@@ -748,6 +720,50 @@ sub populate_directory {
     if (utime($file->{ mtime }, $file->{ mtime }, $path) != 1) {
       print "populate_directory: Unable to set mtime: $path\n";
       File::Path::remove_tree($working_dir);
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+# Compare the set of checksums returned from running checks with those
+# specified in test information.
+sub checksums_are_equal {
+  my ($working_dir, $test_checksums, $returned_checksums) = @_;
+  if (!defined $working_dir || length $working_dir == 0 ||
+    !$test_checksums || !$returned_checksums) {
+    print "checksums_are_equal: Invalid parameter\n";
+    return 0;
+  }
+
+  # Compare the checksums we received (remember, only those files changed or
+  # are new are returned) with what we expected to be returned.
+
+  if (@{ $returned_checksums } != @{ $test_checksums }) {
+    print "checksums_are_equal: " . scalar(@{ $returned_checksums })
+    . " checksums returned, wanted " . scalar(@{ $test_checksums }) . "\n";
+    return 0;
+  }
+
+  for (my $i = 0; $i < @{ $test_checksums }; $i++) {
+    my $wanted = $test_checksums->[ $i ];
+    my $got = $returned_checksums->[ $i ];
+
+    my $wanted_file = $working_dir . $wanted->{ file };
+    if ($got->{ file } ne $wanted_file) {
+      print "checksums_are_equal: file $i file is $got->{ file }, wanted $wanted_file\n";
+      return 0;
+    }
+
+    my $got_sum = unpack('H*', $got->{ checksum });
+    if ($got_sum ne $wanted->{ checksum }) {
+      print "checksums_are_equal: file $i checksum is $got_sum, wanted $wanted->{ checksum }\n";
+      return 0;
+    }
+
+    if ($got->{ ok } != $wanted->{ ok }) {
+      print "checksums_are_equal: file $i ok is $got->{ ok }, wanted $wanted->{ ok }\n";
       return 0;
     }
   }
