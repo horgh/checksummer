@@ -219,7 +219,10 @@ sub check_file {
 			push @dir_checksums, @{ $file_checksums };
 		}
 
-		closedir $dh;
+		if (!closedir $dh) {
+			error("closedir failed: $path");
+			return undef;
+		}
 
 		return \@dir_checksums;
 	}
