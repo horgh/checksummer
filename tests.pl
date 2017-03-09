@@ -42,6 +42,10 @@ sub test_checksummer {
     $failures++;
   }
 
+  if (!&test_run) {
+    $failures++;
+  }
+
   if (!&test_check_file) {
     $failures++;
   }
@@ -223,6 +227,23 @@ sub test_read_config {
   }
 
   print "test_read_config: $failures/" . scalar(@tests) . " failed\n";
+  return 0;
+}
+
+sub test_run {
+  my @tests = (
+  );
+
+  my $failures = 0;
+
+  foreach my $test (@tests) {
+  }
+
+  if ($failures == 0) {
+    return 1;
+  }
+
+  print "test_run: $failures/" . scalar(@tests) . " tests failed\n";
   return 0;
 }
 
@@ -583,58 +604,10 @@ sub test_check_file {
   TEST: foreach my $test (@tests) {
     print "test_check_file: Running test $test->{ desc }...\n";
 
-    if (!mkdir($working_dir)) {
-      print "test_check_file: unable to create working directory: $working_dir: $!\n";
+    if (!&populate_directory($working_dir, $test->{ files })) {
+      print "test_check_file: Unable to create test files\n";
       $failures++;
       next;
-    }
-
-    # Create the files as described by the test.
-
-    foreach my $file (@{ $test->{ files } }) {
-      if (!$file->{ exists }) {
-        next;
-      }
-
-      my $path = $working_dir . $file->{ path };
-
-      if ($file->{ symlink }) {
-        if (!symlink('/tmp', $path)) {
-          print "test_check_file: Unable to symlink: $path\n";
-          $failures++;
-          File::Path::remove_tree($working_dir);
-          next TEST;
-        }
-
-        next;
-      }
-
-      if ($file->{ dir }) {
-        if (!mkdir($path)) {
-          print "test_check_file: Unable to mkdir $path\n";
-          $failures++;
-          File::Path::remove_tree($working_dir);
-          next TEST;
-        }
-
-        next;
-      }
-
-      # Regular file.
-
-      if (!&write_file($path, $file->{ content })) {
-        print "test_check_file: unable to write file: $path\n";
-        $failures++;
-        File::Path::remove_tree($working_dir);
-        next TEST;
-      }
-
-      if (utime($file->{ mtime }, $file->{ mtime }, $path) != 1) {
-        print "test_check_file: unable to set mtime: $path\n";
-        $failures++;
-        File::Path::remove_tree($working_dir);
-        next TEST;
-      }
     }
 
     # We need to prefix the checksums from the database with the working
@@ -719,6 +692,67 @@ sub test_check_file {
 
   print "$failures/" . (scalar(@tests)) . " test_check_file tests failed\n";
   return 0;
+}
+
+# Create and populate a given directory with file(s) specified.
+#
+# Several parts of checksummer rely on interacting with files on disk. It is
+# useful to be able to create a set of files to set with.
+sub populate_directory {
+  my ($working_dir, $files) = @_;
+  if (!defined $working_dir || length $working_dir == 0 || !$files) {
+    print "populate_directory: Invalid parameter\n";
+    return 0;
+  }
+
+  if (!mkdir $working_dir) {
+    print "populate_directory: Unable to create directory: $working_dir: $!\n";
+    return 0;
+  }
+
+  foreach my $file (@{ $files }) {
+    if (!$file->{ exists }) {
+      next;
+    }
+
+    my $path = $working_dir . $file->{ path };
+
+    if ($file->{ symlink }) {
+      if (!symlink('/tmp', $path)) {
+        print "populate_directory: Unable to symlink: $path\n";
+        File::Path::remove_tree($working_dir);
+        return 0;
+      }
+
+      next;
+    }
+
+    if ($file->{ dir }) {
+      if (!mkdir $path ) {
+        print "populate_directory: Unable to mkdir $path\n";
+        File::Path::remove_tree($working_dir);
+        return 0;
+      }
+
+      next;
+    }
+
+    # Regular file.
+
+    if (!&write_file($path, $file->{ content })) {
+      print "populate_directory: Unable to write file: $path\n";
+      File::Path::remove_tree($working_dir);
+      return 0;
+    }
+
+    if (utime($file->{ mtime }, $file->{ mtime }, $path) != 1) {
+      print "populate_directory: Unable to set mtime: $path\n";
+      File::Path::remove_tree($working_dir);
+      return 0;
+    }
+  }
+
+  return 1;
 }
 
 sub test_is_file_excluded {
