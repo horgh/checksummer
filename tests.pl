@@ -35,11 +35,52 @@ sub main {
 sub test_checksummer {
   my $failures = 0;
 
+  if (!&test_is_file_excluded) {
+    $failures++;
+  }
+
   if (!&test_checksum_mismatch) {
     $failures++;
   }
 
   return $failures == 0;
+}
+
+sub test_is_file_excluded {
+  my @tests = (
+    # Excluded.
+    {
+      exclusions => ['/tmp', '/bin'],
+      path       => '/tmp/test.txt',
+      output     => 1,
+    },
+
+    # Not excluded.
+    {
+      exclusions => ['/tmp', '/bin'],
+      path       => '/home/horgh/test.txt',
+      output     => 0,
+    },
+  );
+
+  my $failures = 0;
+
+  foreach my $test (@tests) {
+    my $r = Checksummer::is_file_excluded($test->{ exclusions },
+      $test->{ path });
+    if ($r != $test->{ output }) {
+      print "is_file_excluded(@{ $test->{ exclusions } }, $test->{ path }) = $r, wanted $test->{ output }\n";
+      $failures++;
+      next;
+    }
+  }
+
+  if ($failures == 0) {
+    return 1;
+  }
+
+  print "$failures/" . (scalar(@tests)) . " test_is_file_excluded tests failed\n";
+  return 0;
 }
 
 sub test_checksum_mismatch {

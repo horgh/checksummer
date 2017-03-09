@@ -2,6 +2,9 @@
 # Core checksummer functions.
 #
 
+use strict;
+use warnings;
+
 package Checksummer;
 
 use Checksummer::Util qw/info error debug/;
@@ -167,12 +170,8 @@ sub check_file {
 
 	# Optimization: I am not checking parameters here any more.
 
-	# If the config excludes this file then don't even look at it.
-	foreach my $exclusion (@{ $exclusions }) {
-		if (index($path, $exclusion) == 0) {
-			debug('debug', "Ignoring excluded file: $path (Exclusion: $exclusion)");
-			return [];
-		}
+	if (&is_file_excluded($exclusions, $path)) {
+		return [];
 	}
 
 	# Skip symlinks. Note -f alone is not sufficient to tell.
@@ -256,6 +255,25 @@ sub check_file {
 	}
 
 	return [{ file => $path, checksum => $checksum, ok => 1 }];
+}
+
+# Some paths/files are excluded by the config (prefixed with !).
+#
+# Check if the path to the file begins with an excluded path.
+sub is_file_excluded {
+	my ($exclusions, $path) = @_;
+
+	# Optimization: Don't check parameters.
+
+	# If the config excludes this file then don't even look at it.
+	foreach my $exclusion (@{ $exclusions }) {
+		if (index($path, $exclusion) == 0) {
+			debug('debug', "Excluded file: $path (Exclusion: $exclusion)");
+			return 1;
+		}
+	}
+
+	return 0;
 }
 
 # The current checksum for the file does not match what we have recorded. We

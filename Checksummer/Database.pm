@@ -2,6 +2,9 @@
 # Functions for interaction with the database.
 #
 
+use strict;
+use warnings;
+
 package Checksummer::Database;
 
 use Checksummer::Util qw/info error/;

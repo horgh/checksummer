@@ -4,6 +4,9 @@
 
 package Checksummer::Util;
 
+use strict;
+use warnings;
+
 use Exporter qw/import/;
 use Digest::MD5 qw//;
 use Digest::SHA qw//;
