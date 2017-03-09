@@ -232,7 +232,7 @@ sub check_file {
 
 	# No checksum in the database? Add it. This is the first time we've seen the
 	# file.
-	if (!defined $db_checksums->{ $path }) {
+	if (!exists $db_checksums->{ $path }) {
 		debug('debug', "No checksum found in database for $path, adding");
 		return [{ file => $path, checksum => $checksum, ok => 1 }];
 	}
