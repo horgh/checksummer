@@ -129,12 +129,6 @@ sub check_files {
 			return undef;
 		}
 
-		# And must be readable
-		if (! -r $path) {
-			error("cannot read directory $path");
-			return 0;
-		}
-
 		info("Checking [$path]...");
 
 		# Recursively descend and look at each file
@@ -180,8 +174,6 @@ sub check_file {
 			return [];
 		}
 	}
-
-	# We only checksum regular files. Don't bother with symlinks.
 
 	# Skip symlinks. Note -f alone is not sufficient to tell.
 	if (-l $path) {
