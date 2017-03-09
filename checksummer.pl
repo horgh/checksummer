@@ -170,9 +170,11 @@ sub _get_args {
 sub _print_usage {
 	print "Usage: $0 <arguments>
 
-    [-h]           Print this help information.
+    [-h]           Print this usage information.
 
     -d <path>      Path to an sqlite3 database to use to store paths and checksums.
+
+                   If the database does not yet exist, it will be created.
 
     -c <path>      Path to a config file listing directories to examine.
 
@@ -180,14 +182,13 @@ sub _print_usage {
 
                    We ignore blank lines and # comments.
 
-                   If you prefix the path with ! it will exclude it from reports
-                   about checksum mismatches. You can ignore paths or specific
-                   files this way. It is a substring match applied to the beginning
-                   of the filename.
+                   If you prefix the path with ! it will exclude it from reports about
+                   checksum mismatches. You can ignore paths or specific files this way.
+                   It is a substring match applied to the beginning of the filename.
 
-    -m <string>    Hash method to use. Either sha256 or md5.
+    -m <string>    Hash method to use. Either 'sha256' or 'md5'.
 
-    [-v]           Enable debug output.
+    [-v]           Enable verbose/debug output.
 
 ";
 }
@@ -391,8 +392,7 @@ sub get_db_checksums {
 #
 # $hash_method, string. sha256 or md5. Which hash function to use.
 #
-# $exclusions, array reference. Array of strings. These are paths to not report
-# about.
+# $exclusions, array reference. Array of strings. These are paths to not check.
 #
 # Returns: An array reference, or undef if failure.
 #
@@ -452,8 +452,7 @@ sub check_files {
 #
 # $hash_method, string. sha256 or md5. The hash function to use.
 #
-# $exclusions, array reference. An array of file path prefixes to skip reporting
-# problems about.
+# $exclusions, array reference. An array of file path prefixes to skip checking.
 #
 # Returns: An array reference, or undef if failure.
 #
