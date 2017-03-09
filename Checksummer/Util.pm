@@ -107,33 +107,33 @@ sub set_debug {
 #
 # Returns: None
 sub debug {
-		my ($level, $msg) = @_;
-		if (!defined $level) {
-			&stderr("debug: No level specified.");
+	my ($level, $msg) = @_;
+	if (!defined $level) {
+		&stderr("debug: No level specified.");
+		return;
+	}
+	if (!defined $msg) {
+		&stderr("debug: No message given.");
+		return;
+	}
+
+	if (!$DEBUG && $level eq 'debug') {
 			return;
-		}
-		if (!defined $msg) {
-			&stderr("debug: No message given.");
-			return;
-		}
+	}
 
-		if (!$DEBUG && $level eq 'debug') {
-				return;
-		}
+	chomp $msg;
+	my $caller = (caller(1))[3];
+	if ($caller =~ 'info' || $caller =~ 'error') {
+		$caller = (caller(2))[3];
+	}
 
-		chomp $msg;
-		my $caller = (caller(1))[3];
-		if ($caller =~ 'info' || $caller =~ 'error') {
-			$caller = (caller(2))[3];
-		}
+	my $output = "$caller: $msg";
 
-		my $output = "$caller: $msg";
-
-		if ($level =~ /error/i) {
-				&stderr($output);
-		} else {
-				&stdout($output);
-		}
+	if ($level =~ /error/i) {
+			&stderr($output);
+	} else {
+			&stdout($output);
+	}
 }
 
 # Parameters:
