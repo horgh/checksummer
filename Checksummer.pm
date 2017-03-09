@@ -160,11 +160,14 @@ sub check_files {
 #
 # $exclusions, array reference. An array of file path prefixes to skip checking.
 #
-# Returns: An array reference, or undef if failure.
+# Returns: An array reference, or undef if there was a failure.
 #
 # The array may be empty. If it is not, it will contain one element, a hash
-# reference. This hash reference means the file's checksum changed. It has keys
-# file and checksum.
+# reference. This hash reference means the file's checksum changed, and we
+# should store the new checksum.
+#
+# The hash will have keys file (file path, string), checksum, (its hash,
+# binary), and ok (boolean, true if there was no mismatch problem).
 sub check_file {
 	my ($path, $hash_method, $exclusions, $db_checksums) = @_;
 
@@ -237,7 +240,7 @@ sub check_file {
 	# file.
 	if (!defined $db_checksums->{ $path }) {
 		debug('debug', "No checksum found in database for $path, adding");
-		return [{ file => $path, checksum => $checksum }];
+		return [{ file => $path, checksum => $checksum, ok => 1 }];
 	}
 
 	# If checksum matches then there is nothing to do.
@@ -245,14 +248,24 @@ sub check_file {
 		return [];
 	}
 
-	# Checksum does not match. do something.
-	&handle_mismatch($path, $checksum, $db_checksums->{ $path });
+	my $mismatch_result = &checksum_mismatch($path, $checksum,
+		$db_checksums->{ $path });
+	if ($mismatch_result == -1) {
+		error("Problem checking mismatch for $path");
+		return undef;
+	}
 
-	# Ensure we store the new checksum.
-	return [{ file => $path, checksum => $checksum }];
+	# The mismatch looks problematic.
+	if ($mismatch_result == 1) {
+		return [{ file => $path, checksum => $checksum, ok => 0 }];
+	}
+
+	return [{ file => $path, checksum => $checksum, ok => 1 }];
 }
 
-# Run actions taken when a checksum mismatch is found
+# The current checksum for the file does not match what we have recorded. We
+# check whether this indicates a problem. If it does, we raise a warning. If
+# not, we do nothing.
 #
 # Parameters:
 #
@@ -262,42 +275,48 @@ sub check_file {
 #
 # $old_checksum, string. The old checksum.
 #
-# Returns: None
-sub handle_mismatch {
+# Returns: Integer.
+#
+# The integer will be 0 if the mismatch looks fine. It will be 1 if there
+# appears to be a problem. It will be -1 if there was an error.
+sub checksum_mismatch {
 	my ($file, $checksum, $old_checksum) = @_;
 
 	# Optimization: I am not checking parameters here any more.
 
 	debug('debug', "CHECKSUM MISMATCH: $file");
 
-	# Check the last modified date
-	# It is probable that this mismatch is due to an actual modification taking
-	# place.
+	# Check the last modified date It is probable that this mismatch is due to an
+	# actual modification taking place.
 	my $st = File::stat::stat($file);
 	if (!$st) {
 		error("stat failure: $!");
-		return;
+		return -1;
 	}
 
 	my $mtime = $st->mtime;
 	my $current_time = time;
 	my $one_day_ago = $current_time - 24 * 60 * 60;
 
-	# We have a changed checksum.
-
-	# If the modified time is less than a day ago, then let's assume it
-	# was a regular modification that is OK and we don't need to report it.
+	# If the modified time is less than a day ago, then let's assume it was a
+	# regular modification that is OK and we don't need to report it.
 	#
-	# Why? Because we expect this script to be run once a day, so changes
-	# within that period are expected.
+	# Why? Because we expect this script to be run once a day, so changes within
+	# that period are expected.
 	#
-	# If the recorded modified time was more than a day ago, and we still
-	# have a checksum change, then something might be fishy. Not guaranteed.
+	# If the recorded modified time was more than a day ago, then something might
+	# be fishy. We assume the file should not have changed.
+	#
+	# This is not an absolute. It's possible a file had corruption within the past
+	# day. It is a heuristic.
 
 	if ($mtime < $one_day_ago) {
 		info("Checksum mismatch for a file with modified time more than"
 			. " a day ago: $file Last modified: " . scalar(localtime($mtime)));
+		return 1;
 	}
+
+	return 0;
 }
 
 1;

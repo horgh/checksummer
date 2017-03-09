@@ -5,11 +5,17 @@
 use strict;
 use warnings;
 
+use Checksummer qw//;
 use Checksummer::Util qw//;
 use File::Temp qw//;
 
 sub main {
   my $failures = 0;
+
+  if (!&test_checksummer) {
+    print "Checksummer tests failed\n";
+    $failures++;
+  }
 
   if (!&test_util) {
     print "Util tests failed\n";
@@ -25,7 +31,94 @@ sub main {
   return 0;
 }
 
-# Checksummer::Util tests
+# Package Checksummer tests
+sub test_checksummer {
+  my $failures = 0;
+
+  if (!&test_checksum_mismatch) {
+    $failures++;
+  }
+
+  return $failures == 0;
+}
+
+sub test_checksum_mismatch {
+  my $now = time;
+  my $one_hour_ago = time - 60*60;
+  my $one_week_ago = time - (7*24*60*60);
+
+  my @tests = (
+    # The mtime is recent enough that the mismatch is okay.
+    {
+      file_exists  => 1,
+      mtime        => $one_hour_ago,
+      output       => 0,
+    },
+
+    # The mtime is long enough ago that the mismatch is a problem.
+    {
+      file_exists  => 1,
+      mtime        => $one_week_ago,
+      output       => 1,
+    },
+
+    # Unable to stat the file.
+    {
+      file_exists  => 0,
+      mtime        => $one_week_ago,
+      output       => -1,
+    },
+  );
+
+  my $failures = 0;
+
+  my $tmpfile = File::Temp::tmpnam();
+
+  # The checksums are irrelevant. The function uses them for reporting only. If
+  # it is called, then checksums must have been different.
+  my $new_checksum = '123';
+  my $old_checksum = '456';
+
+  foreach my $test (@tests) {
+    if ($test->{ file_exists }) {
+      if (!&write_file($tmpfile, 'hi')) {
+        print "test_checksum_mismatch: Unable to write file: $tmpfile\n";
+        $failures++;
+        next;
+      }
+
+      if (utime($test->{ mtime }, $test->{ mtime }, $tmpfile) != 1) {
+        print "test_checksum_mismatch: utime failed: $tmpfile\n";
+        $failures++;
+        next;
+      }
+    }
+
+    my $r = Checksummer::checksum_mismatch($tmpfile, $new_checksum,
+      $old_checksum);
+    if ($r != $test->{ output }) {
+      print "checksum_mismatch($tmpfile, ...) = $r, wanted $test->{ output }\n";
+      $failures++;
+      unlink $tmpfile if $test->{ file_exists };
+      next;
+    }
+
+    if ($test->{ file_exists} && !unlink $tmpfile) {
+      print "test_checksum_mismatch: Unable to unlink file: $tmpfile: $!\n";
+      $failures++;
+      next;
+    }
+  }
+
+  if ($failures == 0) {
+    return 1;
+  }
+
+  print "$failures/" . (scalar(@tests)) . " test_checksum_mismatch tests failed\n";
+  return 0;
+}
+
+# Package Checksummer::Util tests
 sub test_util {
   my $failures = 0;
 
@@ -61,6 +154,7 @@ sub test_util_calculate_checksum {
     if (!&write_file($tmpfile, $test->{ input })) {
       print "test_util_calculate_checksum: Unable to write file\n";
       $failures++;
+      unlink $tmpfile;
       next;
     }
 
@@ -68,6 +162,7 @@ sub test_util_calculate_checksum {
     if (!defined $r) {
       print "calculate_checksum($tmpfile, md5): Unable to calculate checksum\n";
       $failures++;
+      unlink $tmpfile;
       next;
     }
 
@@ -75,6 +170,7 @@ sub test_util_calculate_checksum {
     if ($sum ne $test->{ md5_hash}) {
       print "calculate_checksum($tmpfile, md5) = $sum, wanted $test->{ md5_hash }\n";
       $failures++;
+      unlink $tmpfile;
       next;
     }
 
@@ -82,12 +178,20 @@ sub test_util_calculate_checksum {
     if (!defined $r) {
       print "calculate_checksum($tmpfile, sha256): Unable to calculate checksum\n";
       $failures++;
+      unlink $tmpfile;
       next;
     }
 
     $sum = unpack('H*', $r);
     if ($sum ne $test->{ sha256_hash}) {
       print "calculate_checksum($tmpfile, sha256) = $sum, wanted $test->{ sha256_hash }\n";
+      $failures++;
+      unlink $tmpfile;
+      next;
+    }
+
+    if (!unlink $tmpfile) {
+      print "test_util_calculate_checksum: Unable to unlink: $tmpfile: $!\n";
       $failures++;
       next;
     }
