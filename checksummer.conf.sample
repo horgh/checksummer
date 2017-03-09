@@ -1,0 +1,5 @@
+# Checksum all files under /home/horgh
+/home/horgh
+
+# Except those beginning with /home/horgh/tmp
+!/home/horgh/tmp
