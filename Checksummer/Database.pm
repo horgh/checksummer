@@ -10,6 +10,33 @@ package Checksummer::Database;
 use Checksummer::Util qw/info error/;
 use Exporter qw/import/;
 
+sub open_db {
+	my ($file) = @_;
+	if (!defined $file || length $file == 0) {
+		error("Invalid parameter");
+		return undef;
+	}
+
+	my $dbh = DBI->connect("dbi:SQLite:dbname=$file", '', '');
+	if (!$dbh) {
+		error($DBI::errstr);
+		return undef;
+	}
+
+	if (!&create_schema_if_needed($dbh)) {
+		error("Failed to create database schema.");
+		return undef;
+	}
+
+	# LIKE is case insensitive by default in sqlite. Make it case sensitive.
+	if (!$dbh->do('PRAGMA case_sensitive_like = 1')) {
+		error("Unable to enable LIKE CASE sensitivity: " . $dbh->errstr);
+		return undef;
+	}
+
+	return $dbh;
+}
+
 # Create our schema if it does not already exist.
 #
 # Parameters:
@@ -104,14 +131,23 @@ sub table_exists {
 # The hash will have keys that are filenames, with the values being the checksum
 # for the file.
 sub get_db_checksums {
-	my ($dbh) = @_;
+	my ($dbh, $path) = @_;
 	if (!$dbh) {
 		error("You must provide a database handle");
 		return undef;
 	}
+	if (!defined $path || length $path == 0) {
+		error("You must provide a path");
+		return undef;
+	}
 
-	my $sql = q/SELECT file, checksum FROM checksums/;
-	my @params = ();
+	my $path_sql = $path;
+	$path_sql =~ s/_/\\_/g;
+	$path_sql =~ s/%/\\%/g;
+	$path_sql .= '%';
+
+	my $sql = q/SELECT file, checksum FROM checksums WHERE file LIKE ? ESCAPE '\\'/;
+	my @params = ($path_sql);
 
 	my $rows = &db_select($dbh, $sql, \@params);
 	if (!$rows) {
@@ -151,6 +187,12 @@ sub update_db_checksums {
 		return 0;
 	}
 
+	# Use a transaction for faster bulk inserts.
+	if (!$dbh->begin_work) {
+		error("Unable to start transaction: " . $dbh->errstr);
+		return 0;
+	}
+
 	foreach my $file_and_checksum (@{ $new_checksums }) {
 		my $file = $file_and_checksum->{ file };
 		my $checksum = $file_and_checksum->{ checksum };
@@ -159,17 +201,25 @@ sub update_db_checksums {
 			my $update_res = $update_sth->execute($checksum, $file);
 			if (!defined $update_res) {
 				error("Unable to update database for file $file: " . $update_sth->errstr);
+				$dbh->rollback;
 				return 0;
 			}
+
 			next;
 		}
 
 		my $insert_res = $insert_sth->execute($file, $checksum);
 		if (!defined $insert_res) {
-				error("Unable to insert into database for file $file: " .
-					$insert_sth->errstr);
-				return 0;
+			error("Unable to insert into database for file $file: " .
+				$insert_sth->errstr);
+			$dbh->rollback;
+			return 0;
 		}
+	}
+
+	if (!$dbh->commit) {
+		error("Unable to commit transaction: " . $dbh->errstr);
+		return 0;
 	}
 
 	return 1;

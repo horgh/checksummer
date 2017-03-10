@@ -152,7 +152,7 @@ sub is_valid_config {
 # Each element in the array is a hash reference, and will have the same keys
 # as described by check_file() (file, checksum, ok).
 sub run {
-	my ($db_file, $hash_method, $config) = @_;
+	my ($db_file, $hash_method, $config, $should_return_new_checksums) = @_;
 	if (!defined $db_file || length $db_file == 0 ||
 		!defined $hash_method || length $hash_method == 0 ||
 		!$config) {
@@ -160,52 +160,16 @@ sub run {
 		return undef;
 	}
 
-	my $dbh = DBI->connect("dbi:SQLite:dbname=$db_file", '', '');
+	my $dbh = Checksummer::Database::open_db($db_file);
 	if (!$dbh) {
-		error($DBI::errstr);
+		error("Cannot open database");
 		return undef;
 	}
 
-	# Use a transaction for faster bulk inserts.
-	if (!$dbh->begin_work) {
-		error("Unable to start transaction: " . $dbh->errstr);
-		return undef;
-	}
-
-	if (!Checksummer::Database::create_schema_if_needed($dbh)) {
-		error("Failed to create database schema.");
-		$dbh->rollback;
-		return undef;
-	}
-
-	info("Loading checksums...");
-
-	my $db_checksums = Checksummer::Database::get_db_checksums($dbh);
-	if (!$db_checksums) {
-		error("Unable to load current checksums.");
-		$dbh->rollback;
-		return undef;
-	}
-
-	info("Checking files...");
-
-	my $new_checksums = Checksummer::check_files($config->{ paths },
-		$hash_method, $config->{ exclusions }, $db_checksums);
+	my $new_checksums = Checksummer::check_files($dbh, $config->{ paths },
+		$hash_method, $config->{ exclusions }, $should_return_new_checksums);
 	if (!$new_checksums) {
 		error('Failure performing file checks.');
-		$dbh->rollback;
-		return undef;
-	}
-
-	if (!Checksummer::Database::update_db_checksums($dbh, $db_checksums,
-			$new_checksums)) {
-		error("Unable to perform database updates.");
-		$dbh->rollback;
-		return undef;
-	}
-
-	if (!$dbh->commit) {
-		error("Unable to commit transaction: " . $dbh->errstr);
 		return undef;
 	}
 
@@ -240,11 +204,11 @@ sub run {
 # file and current checksum for the file. An element will only be present if
 # the file's checksum changed. The hash reference has keys file and checksum.
 sub check_files {
-	my ($paths, $hash_method, $exclusions, $db_checksums) = @_;
-	if (!$paths ||
-		!defined $hash_method || length $hash_method == 0 ||
-		!$db_checksums) {
-		error("invalid parameter");
+	my ($dbh, $paths, $hash_method, $exclusions,
+		$should_return_new_checksums) = @_;
+	if (!$dbh || !$paths || @$paths == 0 || !defined $hash_method ||
+		length $hash_method == 0 || !$exclusions) {
+		error("Invalid parameter");
 		return undef;
 	}
 
@@ -253,6 +217,16 @@ sub check_files {
 	foreach my $path (@{ $paths }) {
 		info("Checking [$path]...");
 
+		# As a memory optimization, load checksums for files from the database
+		# under each path rather than all checkums at once. Then update the database
+		# with any new checksums under this path, and repeat.
+
+		my $db_checksums = Checksummer::Database::get_db_checksums($dbh, $path);
+		if (!$db_checksums) {
+			error("Unable to load current checksums.");
+			return undef;
+		}
+
 		my $path_checksums = &check_file($path, $hash_method, $exclusions,
 			$db_checksums);
 		if (!$path_checksums) {
@@ -260,7 +234,17 @@ sub check_files {
 			return undef;
 		}
 
-		push @new_checksums, @{ $path_checksums };
+		if (!Checksummer::Database::update_db_checksums($dbh, $db_checksums,
+				$path_checksums)) {
+			error("Unable to perform database updates.");
+			return undef;
+		}
+
+		# Conditionally return the new checksums. This is useful for testing, but in
+		# real runs this can lead to high memory consumption.
+		if ($should_return_new_checksums) {
+			push @new_checksums, @{ $path_checksums };
+		}
 	}
 
 	return \@new_checksums;

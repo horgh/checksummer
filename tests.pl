@@ -345,18 +345,10 @@ sub test_run {
 
     # Populate the database with the initial state we specify.
 
-    my $dbh = DBI->connect("dbi:SQLite:dbname=$db_file", '', '');
+    my $dbh = Checksummer::Database::open_db($db_file);
     if (!$dbh) {
-      print "test_run: Unable to connect to database: " . $DBI::errstr . "\n";
-      $failures++;
-      next;
-    }
-
-    if (!Checksummer::Database::create_schema_if_needed($dbh)) {
-      print "test_run: Failed to create db schema\n";
-      $failures++;
-      unlink $db_file;
-      next;
+      error("Cannot open database");
+      return undef;
     }
 
     # Pretend nothing is in the database. Well we don't have to pretend! But the
@@ -408,7 +400,7 @@ sub test_run {
 
     # Check.
     my $returned_checksums = Checksummer::run($db_file, $hash_method,
-      $test->{ config });
+      $test->{ config }, 1);
 
     File::Path::remove_tree($working_dir);
     unlink $db_file;
