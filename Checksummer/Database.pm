@@ -144,7 +144,7 @@ sub get_db_checksums {
 	my $path_sql = $path;
 	$path_sql =~ s/_/\\_/g;
 	$path_sql =~ s/%/\\%/g;
-	$path_sql .= '%';
+	$path_sql .= '/%';
 
 	my $sql = q/SELECT file, checksum FROM checksums WHERE file LIKE ? ESCAPE '\\'/;
 	my @params = ($path_sql);
