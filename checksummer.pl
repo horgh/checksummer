@@ -40,7 +40,9 @@ sub main {
 
 	my $start = time;
 
-	if (!Checksummer::run($args->{ db_file }, $args->{ hash_method }, $config)) {
+	my $new_checksums = Checksummer::run($args->{ db_file },
+		$args->{ hash_method }, $config);
+	if (!$new_checksums) {
 		error("Failure running checks.");
 		return 0;
 	}

@@ -145,31 +145,37 @@ sub is_valid_config {
 
 # Run checks using checksums from a database. We create the database if
 # necessary, and update it with any changed or new checksums.
+#
+# Returns: An array reference containing the files that changed, or undef if
+# failure.
+#
+# Each element in the array is a hash reference, and will have the same keys
+# as described by check_file() (file, checksum, ok).
 sub run {
 	my ($db_file, $hash_method, $config) = @_;
 	if (!defined $db_file || length $db_file == 0 ||
 		!defined $hash_method || length $hash_method == 0 ||
 		!$config) {
 		error("Invalid parameter");
-		return 0;
+		return undef;
 	}
 
 	my $dbh = DBI->connect("dbi:SQLite:dbname=$db_file", '', '');
 	if (!$dbh) {
 		error($DBI::errstr);
-		return 0;
+		return undef;
 	}
 
 	# Use a transaction for faster bulk inserts.
 	if (!$dbh->begin_work) {
 		error("Unable to start transaction: " . $dbh->errstr);
-		return 0;
+		return undef;
 	}
 
 	if (!Checksummer::Database::create_schema_if_needed($dbh)) {
 		error("Failed to create database schema.");
 		$dbh->rollback;
-		return 0;
+		return undef;
 	}
 
 	info("Loading checksums...");
@@ -178,7 +184,7 @@ sub run {
 	if (!$db_checksums) {
 		error("Unable to load current checksums.");
 		$dbh->rollback;
-		return 0;
+		return undef;
 	}
 
 	info("Checking files...");
@@ -188,21 +194,21 @@ sub run {
 	if (!$new_checksums) {
 		error('Failure performing file checks.');
 		$dbh->rollback;
-		return 0;
+		return undef;
 	}
 
 	if (!Checksummer::Database::db_updates($dbh, $db_checksums, $new_checksums)) {
 		error("Unable to perform database updates.");
 		$dbh->rollback;
-		return 0;
+		return undef;
 	}
 
 	if (!$dbh->commit) {
 		error("Unable to commit transaction: " . $dbh->errstr);
-		return 0;
+		return undef;
 	}
 
-	return 1;
+	return $new_checksums;
 }
 
 # Check all files.
@@ -273,7 +279,7 @@ sub check_files {
 # reference. This hash reference means the file's checksum changed, and we
 # should store the new checksum.
 #
-# The hash will have keys file (file path, string), checksum, (its hash,
+# The hash will have keys file (file, string, the path), checksum (its hash,
 # binary), and ok (boolean, true if there was no mismatch problem).
 sub check_file {
 	my ($path, $hash_method, $exclusions, $db_checksums) = @_;

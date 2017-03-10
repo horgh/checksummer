@@ -231,12 +231,210 @@ sub test_read_config {
 }
 
 sub test_run {
+  my $now = time;
+  my $one_hour_ago = time - 60*60;
+  my $one_week_ago = time - (7*24*60*60);
+
+  my $hex_md5sum_of_123 = '202cb962ac59075b964b07152d234b70';
+  my $binary_md5sum_of_123 = pack('H*', $hex_md5sum_of_123);
+
   my @tests = (
+    # A set of files, all with checksums in the database, all matching.
+    {
+      desc   => 'all files in db, same checksums',
+      config => {
+        paths      => ['/dir1', '/dir2'],
+        exclusions => [],
+      },
+      db_checksums => [
+        { file => '/dir1/test.txt', checksum => $binary_md5sum_of_123 },
+        { file => '/dir2/test.txt', checksum => $binary_md5sum_of_123 },
+      ],
+      files => [
+        { path => '/dir1',          exists => 1, dir     => 1 },
+        { path => '/dir1/test.txt', exists => 1, content => '123' },
+        { path => '/dir2',          exists => 1, dir     => 1 },
+        { path => '/dir2/test.txt', exists => 1, content => '123' },
+      ],
+      returned_checksums => [
+      ],
+      want_error => 0,
+    },
+
+    # A set of files, none of which have checksums in the database yet.
+    {
+      desc   => 'no checksums in db',
+      config => {
+        paths      => ['/dir1', '/dir2'],
+        exclusions => [],
+      },
+      db_checksums => [
+      ],
+      files => [
+        { path => '/dir1',          exists => 1, dir     => 1 },
+        { path => '/dir1/test.txt', exists => 1, content => '123' },
+        { path => '/dir2',          exists => 1, dir     => 1 },
+        { path => '/dir2/test.txt', exists => 1, content => '123' },
+      ],
+      returned_checksums => [
+        { file => '/dir1/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
+        { file => '/dir2/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
+      ],
+      want_error => 0,
+    },
+
+    # A set of files, one of which has a checksum mismatch that is not a
+    # problem since the mtime is recent.
+    {
+      desc   => 'ok checksum mismatch',
+      config => {
+        paths      => ['/dir1', '/dir2'],
+        exclusions => [],
+      },
+      db_checksums => [
+        { file => '/dir1/test.txt', checksum => $binary_md5sum_of_123 },
+        { file => '/dir2/test.txt', checksum => 1 },
+      ],
+      files => [
+        { path => '/dir1',          exists => 1, dir     => 1 },
+        { path => '/dir1/test.txt', exists => 1, content => '123' },
+        { path => '/dir2',          exists => 1, dir     => 1 },
+        { path => '/dir2/test.txt', exists => 1, content => '123',
+          mtime => $one_hour_ago, },
+      ],
+      returned_checksums => [
+        { file => '/dir2/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
+      ],
+      want_error => 0,
+    },
+
+    # A set of files, one of which has a checksum mismatch that is a problem
+    # since the mtime is long ago.
+    {
+      desc   => 'bad checksum mismatch',
+      config => {
+        paths      => ['/dir1', '/dir2'],
+        exclusions => [],
+      },
+      db_checksums => [
+        { file => '/dir1/test.txt', checksum => $binary_md5sum_of_123 },
+        { file => '/dir2/test.txt', checksum => 1 },
+      ],
+      files => [
+        { path => '/dir1',          exists => 1, dir     => 1 },
+        { path => '/dir1/test.txt', exists => 1, content => '123' },
+        { path => '/dir2',          exists => 1, dir     => 1 },
+        { path => '/dir2/test.txt', exists => 1, content => '123',
+          mtime => $one_week_ago },
+      ],
+      returned_checksums => [
+        { file => '/dir2/test.txt', checksum => $hex_md5sum_of_123, ok => 0 },
+      ],
+      want_error => 0,
+    },
   );
+
+  my $db_file = File::Temp::tmpnam();
+  my $hash_method = 'md5';
+  my $working_dir = File::Temp::tmpnam();
 
   my $failures = 0;
 
   foreach my $test (@tests) {
+    print "test_run: Running test $test->{ desc }\n";
+
+    # Populate the database with the initial state we specify.
+
+    my $dbh = DBI->connect("dbi:SQLite:dbname=$db_file", '', '');
+    if (!$dbh) {
+      print "test_run: Unable to connect to database: " . $DBI::errstr . "\n";
+      $failures++;
+      next;
+    }
+
+    if (!Checksummer::Database::create_schema_if_needed($dbh)) {
+      print "test_run: Failed to create db schema\n";
+      $failures++;
+      unlink $db_file;
+      next;
+    }
+
+    # Pretend nothing is in the database. Well we don't have to pretend! But the
+    # function relies on a hash of files => checksums to check whether to
+    # insert/update.
+    my $current_checksums = {};
+
+    # Prepend all paths to set in the db with the working dir. This is what
+    # we'll see when we run checks shortly.
+    for (my $i = 0; $i < @{ $test->{ db_checksums } }; $i++) {
+      $test->{ db_checksums }[ $i ]{ file } =
+        $working_dir . $test->{ db_checksums }[ $i ]{ file };
+    }
+
+    if (!Checksummer::Database::db_updates($dbh, $current_checksums,
+        $test->{ db_checksums })) {
+      print "test_run: Unable to perform database updates.\n";
+      $failures++;
+      unlink $db_file;
+      next;
+    }
+
+    if (!$dbh->disconnect) {
+      print "test_run: Unable to disconnect from database: " . $dbh->errstr . "\n";
+      $failures++;
+      unlink $db_file;
+      next;
+    }
+
+    # Create files to check.
+    if (!&populate_directory($working_dir, $test->{ files })) {
+      print "test_run: Unable to create files to test with\n";
+      $failures++;
+      unlink $db_file;
+      next;
+    }
+
+    # Paths/exclusions must have the working dir prepended.
+
+    for (my $i = 0; $i < @{ $test->{ config }{ paths } }; $i++) {
+      my $path = $test->{ config }{ paths }[ $i ];
+      $test->{ config }{ paths }[ $i ] = $working_dir . $path;
+    }
+
+    for (my $i = 0; $i < @{ $test->{ config }{ exclusions } }; $i++) {
+      my $path = $test->{ config }{ exclusions }[ $i ];
+      $test->{ config }{ exclusions }[ $i ] = $working_dir . $path;
+    }
+
+    # Check.
+    my $returned_checksums = Checksummer::run($db_file, $hash_method,
+      $test->{ config });
+
+    File::Path::remove_tree($working_dir);
+    unlink $db_file;
+
+    if ($test->{ want_error }) {
+      if (defined $returned_checksums) {
+        print "test_run: wanted failure, but succeeded\n";
+        $failures++;
+        next;
+      }
+
+      next;
+    }
+
+    if (!defined $returned_checksums) {
+      print "test_run: wanted success, but failed\n";
+      $failures++;
+      next;
+    }
+
+    if (!&checksums_are_equal($working_dir, $test->{ returned_checksums },
+        $returned_checksums)) {
+      print "test_run: returned checksums are not what we want\n";
+      $failures++;
+      next;
+    }
   }
 
   if ($failures == 0) {
@@ -670,6 +868,19 @@ sub test_check_file {
 #
 # Several parts of checksummer rely on interacting with files on disk. It is
 # useful to be able to create a set of files to set with.
+#
+# You describe the files to create by providing them in an array reference.
+# Each element in the array must be a hash reference. The possible keys are:
+#
+# - path, path to the file. This will be under the working directory (this
+#   function takes care of that. This is required.
+# - dir, boolean, whether the file should be a directory. Optional. Default 0.
+# - symlink, boolean, whether the file should be a symlink. Optional. Default 0.
+# - exists, boolean, whether to create the file at all. Optional. Default 0.
+# - mtime, numeric, unixtime, the modified time to set on a file. Optional.
+#   Default 0.
+# - content, string, the content to put in the file if it is a regular file.
+#   Optional. Defaults to ''.
 sub populate_directory {
   my ($working_dir, $files) = @_;
   if (!defined $working_dir || length $working_dir == 0 || !$files) {
@@ -711,13 +922,19 @@ sub populate_directory {
 
     # Regular file.
 
-    if (!&write_file($path, $file->{ content })) {
+    my $content = '';
+    if (exists $file->{ content }) {
+      $content = $file->{ content };
+    }
+
+    if (!&write_file($path, $content)) {
       print "populate_directory: Unable to write file: $path\n";
       File::Path::remove_tree($working_dir);
       return 0;
     }
 
-    if (utime($file->{ mtime }, $file->{ mtime }, $path) != 1) {
+    if (exists $file->{ mtime } &&
+      utime($file->{ mtime }, $file->{ mtime }, $path) != 1) {
       print "populate_directory: Unable to set mtime: $path\n";
       File::Path::remove_tree($working_dir);
       return 0;
