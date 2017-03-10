@@ -371,7 +371,7 @@ sub test_run {
         $working_dir . $test->{ db_checksums }[ $i ]{ file };
     }
 
-    if (!Checksummer::Database::db_updates($dbh, $current_checksums,
+    if (!Checksummer::Database::update_db_checksums($dbh, $current_checksums,
         $test->{ db_checksums })) {
       print "test_run: Unable to perform database updates.\n";
       $failures++;

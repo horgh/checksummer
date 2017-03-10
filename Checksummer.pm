@@ -197,7 +197,8 @@ sub run {
 		return undef;
 	}
 
-	if (!Checksummer::Database::db_updates($dbh, $db_checksums, $new_checksums)) {
+	if (!Checksummer::Database::update_db_checksums($dbh, $db_checksums,
+			$new_checksums)) {
 		error("Unable to perform database updates.");
 		$dbh->rollback;
 		return undef;

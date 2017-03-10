@@ -20,27 +20,45 @@ use Exporter qw/import/;
 sub create_schema_if_needed {
 	my ($dbh) = @_;
 	if (!$dbh) {
-		error("invalid parameter");
+		error("Invalid parameter");
 		return 0;
 	}
 
-	my $checksum_sql = q/
+	my $table_name = 'checksums';
+
+	if (&table_exists($dbh, $table_name)) {
+		return 1;
+	}
+
+	info("Creating table [$table_name]");
+
+	my $table_sql = q/
 CREATE TABLE checksums (
-id INTEGER PRIMARY KEY,
-file NOT NULL,
-checksum NOT NULL,
-UNIQUE(file)
+  id INTEGER PRIMARY KEY,
+  file NOT NULL,
+  checksum NOT NULL,
+  UNIQUE(file)
 )
 /;
-	if (!&create_table_if_not_exists($dbh, 'checksums', $checksum_sql)) {
-		error("failure creating table: checksums");
+
+	my $r = &db_manipulate($dbh, $table_sql, []);
+	if (!defined $r) {
+		error("Unable to create table $table_name");
+		return 0;
+	}
+
+	my $index_sql = q/CREATE INDEX file_idx ON checksums (file)/;
+
+	$r = &db_manipulate($dbh, $index_sql, []);
+	if (!defined $r) {
+		error("Unable to create index on table $table_name");
 		return 0;
 	}
 
 	return 1;
 }
 
-# Create the given table if it does not already exist
+# Check if the given table exists in the database.
 #
 # Parameters:
 #
@@ -48,36 +66,27 @@ UNIQUE(file)
 #
 # $table, string. The table name.
 #
-# $table_sql, string. The SQL to use to create the table.
-#
-# Returns: Boolean, whether successful.
-sub create_table_if_not_exists {
-	my ($dbh, $table, $table_sql) = @_;
-	if (!$dbh ||
-		!defined $table || length $table == 0 ||
-		!defined $table_sql || length $table_sql == 0) {
-		error("invalid arguments");
+# Returns: Boolean, whether it does.
+sub table_exists {
+	my ($dbh, $table) = @_; if (!$dbh ||
+		!defined $table || length $table == 0) {
+		error("Invalid argument");
 		return 0;
 	}
 
-	# Check if the table exists
-	my $sql = q/
-SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?
-/;
-	my @params = ($table,);
+	my $sql = q/SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?/;
+	my @params = ($table);
 
 	my $rows = &db_select($dbh, $sql, \@params);
 	if (!$rows) {
-		error("failure selecting table from db");
+		error("Failure selecting table from db");
 		return 0;
 	}
 
-	# There is a row in the result if it exists
 	return 1 if @{ $rows } > 0;
+	return 0;
 
 	# Create the table
-	info("Creating table: $table");
-	return &db_manipulate($dbh, $table_sql, []) != -1;
 }
 
 # Load all current checksums from the database into memory.
@@ -121,7 +130,7 @@ sub get_db_checksums {
 
 # Bulk INSERT/UPDATE the database with the files and checksums we have found
 # either new or changed.
-sub db_updates {
+sub update_db_checksums {
 	my ($dbh, $old_checksums, $new_checksums) = @_;
 	if (!$dbh || !$old_checksums || !$new_checksums) {
 		error("Invalid parameter");
