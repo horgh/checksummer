@@ -172,11 +172,13 @@ sub run {
 		return undef;
 	}
 
-	if (!Checksummer::Database::prune_database_of_deleted_files($dbh,
-			$start_time)) {
+	my $pruned_count = Checksummer::Database::prune_database($dbh, $start_time);
+	if ($pruned_count == -1) {
 		error("Unable to prune database of deleted files.");
 		return undef;
 	}
+
+	info("Pruned $pruned_count database records.");
 
 	return $new_checksums;
 }

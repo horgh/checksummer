@@ -142,10 +142,9 @@ sub get_db_records {
 		error("You must provide a database handle");
 		return undef;
 	}
-	if (!defined $path || length $path == 0) {
-		error("You must provide a path");
-		return undef;
-	}
+
+	# Let path be empty. This retrieves all.
+	$path = '' if !defined $path;
 
 	my $path_sql = $path;
 	$path_sql =~ s/_/\\_/g;
@@ -246,19 +245,19 @@ sub update_db_records {
 # files in the database that were deleted. Delete any rows that have times prior
 # to the given time. The given time should be prior to computing the new set of
 # checksums.
-sub prune_database_of_deleted_files {
+sub prune_database {
 	my ($dbh, $unixtime) = @_;
 	if (!$dbh || !defined $unixtime) {
 		error("Invalid parameter");
-		return 0;
+		return -1;
 	}
 
 	my $sql = q/DELETE FROM checksums WHERE checksum_time < ?/;
 
-	my $rows_affected = $dbh->do($sql);
+	my $rows_affected = $dbh->do($sql, undef, $unixtime);
 	if (!defined $rows_affected) {
 		error("Unable to delete rows: " . $dbh->errstr);
-		return 0;
+		return -1;
 	}
 
 	# DBI returns 0 as 0E0.
@@ -266,9 +265,7 @@ sub prune_database_of_deleted_files {
 		$rows_affected = 0;
 	}
 
-	info("Pruned $rows_affected rows.");
-
-	return 1;
+	return $rows_affected;
 }
 
 sub db_select {

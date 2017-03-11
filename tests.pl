@@ -20,6 +20,11 @@ sub main {
     $failures++;
   }
 
+  if (!&test_database) {
+    print "Database tests failed\n";
+    $failures++;
+  }
+
   if (!&test_util) {
     print "Util tests failed\n";
     $failures++;
@@ -371,8 +376,9 @@ sub test_run {
 
     my $dbh = Checksummer::Database::open_db($db_file);
     if (!$dbh) {
-      error("Cannot open database");
-      return undef;
+      print "test_run: Cannot open database\n";
+      $failures++;
+      next;
     }
 
     # Pretend nothing is in the database. Well we don't have to pretend! But the
@@ -1171,6 +1177,138 @@ sub test_checksum_mismatch {
   }
 
   print "$failures/" . (scalar(@tests)) . " test_checksum_mismatch tests failed\n";
+  return 0;
+}
+
+sub test_database {
+  my $failures = 0;
+
+  if (!&test_prune_database) {
+    $failures++;
+  }
+
+  return $failures == 0;
+}
+
+sub test_prune_database {
+  my @tests = (
+    # Records present, but none to prune.
+    {
+      records_before => [
+        { file => '/dir/test.txt',  checksum => '123', checksum_time => 15, },
+        { file => '/dir/test2.txt', checksum => '123', checksum_time => 15, },
+      ],
+      unixtime      => 10,
+      pruned        => 0,
+      records_after => {
+        '/dir/test.txt'  => { checksum => '123', checksum_time => 15, },
+        '/dir/test2.txt' => { checksum => '123', checksum_time => 15, },
+      },
+    },
+
+    # No records present.
+    {
+      records_before => [
+      ],
+      unixtime      => 10,
+      pruned        => 0,
+      records_after => {
+      },
+    },
+
+    # Multiple records that all need pruning.
+    {
+      records_before => [
+        { file => '/dir/test.txt',  checksum => '123', checksum_time => 5, },
+        { file => '/dir/test2.txt', checksum => '123', checksum_time => 5, },
+      ],
+      unixtime      => 10,
+      pruned        => 2,
+      records_after => {
+      },
+    },
+
+    # Some records to prune, some to not.
+  );
+
+  my $db_file = File::Temp::tmpnam();
+
+  my $failures = 0;
+
+  TEST: foreach my $test (@tests) {
+    my $dbh = Checksummer::Database::open_db($db_file);
+    if (!$dbh) {
+      print "test_prune_database: Cannot open database\n";
+      $failures++;
+      return undef;
+    }
+
+    my $current_checksums = {};
+    if (!Checksummer::Database::update_db_records($dbh, $current_checksums,
+        $test->{ records_before })) {
+      print "test_prune_database: Unable to perform database updates.\n";
+      $failures++;
+      unlink $db_file;
+      next;
+    }
+
+    my $pruned_count = Checksummer::Database::prune_database($dbh,
+      $test->{ unixtime });
+
+    if ($pruned_count != $test->{ pruned }) {
+      print "test_prune_database: pruned count = $pruned_count, wanted $test->{ pruned }\n";
+      $failures++;
+      unlink $db_file;
+      next;
+    }
+
+    my $records = Checksummer::Database::get_db_records($dbh, '');
+
+    unlink $db_file;
+
+    if (!$records) {
+      print "test_prune_database: unable to retrieve records\n";
+      $failures++;
+      next;
+    }
+
+    if (scalar(keys(%{ $records })) != scalar(keys(%{ $test->{ records_after } }))) {
+      print "test_prune_database: unexpected number of records after test, wanted "
+        . scalar(keys(%{ $test->{ records_after } })) . ", got "
+        . scalar(keys(%{ $records })) . "\n";
+      $failures++;
+      next;
+    }
+
+    foreach my $key (keys %{ $test->{ records_after } }) {
+      if (!exists $records->{ $key }) {
+        print "FAILURE: prune_database(): record for file not found: $key\n";
+        $failures++;
+        next TEST;
+      }
+
+      my $wanted = $test->{ records_after }{ $key };
+      my $got = $records->{ $key };
+
+      if ($wanted->{ checksum } ne $got->{ checksum }) {
+        print "FAILURE: prune_database(): record after: $key: checksum = $got->{ checksum }, wanted $wanted->{ checksum }\n";
+        $failures++;
+        next TEST;
+      }
+
+      if ($wanted->{ checksum_time } ne $got->{ checksum_time }) {
+        print "FAILURE: prune_database(): record after: $key: checksum_time = $got->{ checksum_time }, wanted $wanted->{ checksum_time }\n";
+        $failures++;
+        next TEST;
+      }
+    }
+  }
+
+  if ($failures == 0) {
+    return 1;
+  }
+
+  print "$failures/" . scalar(@tests) . " prune_database tests failed\n";
   return 0;
 }
 
