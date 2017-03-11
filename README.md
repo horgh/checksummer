@@ -34,11 +34,10 @@ level. This program can help if that is not an option.
     monitor. checksummer recursively descends all directories you specify.
   * Run the program. For example:
 
-    perl checksummer.pl -d checksummer.db -c checksummer.conf -m md5
+        perl checksummer.pl -d checksummer.db -c checksummer.conf -m md5
 
-  * This creates the database automatically as necessary.
-  * You will want to run this in cron. Typically at least once a day, as that
-    one of the heuristics currently assumes this.
+  * It creates the database automatically if it does not exist.
+  * Run it periodically, such as from cron, to monitor files.
 
 
 # Database interaction
