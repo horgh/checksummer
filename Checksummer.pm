@@ -147,12 +147,9 @@ sub is_valid_config {
 # necessary, and update it with any changed or new checksums.
 #
 # Returns: An array reference containing the files that changed, or undef if
-# failure.
-#
-# Each element in the array is a hash reference, and will have the same keys
-# as described by check_file() (file, checksum, ok).
+# failure. See check_files() for an explanation of the return value.
 sub run {
-	my ($db_file, $hash_method, $config, $should_return_new_checksums) = @_;
+	my ($db_file, $hash_method, $config, $should_return_checksums) = @_;
 	if (!defined $db_file || length $db_file == 0 ||
 		!defined $hash_method || length $hash_method == 0 ||
 		!$config) {
@@ -166,10 +163,18 @@ sub run {
 		return undef;
 	}
 
+	my $start_time = time;
+
 	my $new_checksums = Checksummer::check_files($dbh, $config->{ paths },
-		$hash_method, $config->{ exclusions }, $should_return_new_checksums);
+		$hash_method, $config->{ exclusions }, $should_return_checksums);
 	if (!$new_checksums) {
 		error('Failure performing file checks.');
+		return undef;
+	}
+
+	if (!Checksummer::Database::prune_database_of_deleted_files($dbh,
+			$start_time)) {
+		error("Unable to prune database of deleted files.");
 		return undef;
 	}
 
@@ -198,14 +203,20 @@ sub run {
 #
 # $exclusions, array reference. Array of strings. These are paths to not check.
 #
+# $should_return_checksums, boolean. Whether to return information about files
+# or not. As doing so necessarily requires using memory, you may not wish to do
+# this.
+#
 # Returns: An array reference, or undef if failure.
 #
-# The array is filled with hash references. Each hash reference indicates the
-# file and current checksum for the file. An element will only be present if
-# the file's checksum changed. The hash reference has keys file and checksum.
+# If you ask to return checksums, then the array is filled with hash references.
+# Each hash reference provides the file and current checksum for the file. All
+# files under the given path will be present, no matter whether the file's
+# checksum changed or not. For information about the format of the hash, see
+# check_file().
 sub check_files {
 	my ($dbh, $paths, $hash_method, $exclusions,
-		$should_return_new_checksums) = @_;
+		$should_return_checksums) = @_;
 	if (!$dbh || !$paths || @$paths == 0 || !defined $hash_method ||
 		length $hash_method == 0 || !$exclusions) {
 		error("Invalid parameter");
@@ -221,28 +232,28 @@ sub check_files {
 		# under each path rather than all checkums at once. Then update the database
 		# with any new checksums under this path, and repeat.
 
-		my $db_checksums = Checksummer::Database::get_db_checksums($dbh, $path);
-		if (!$db_checksums) {
-			error("Unable to load current checksums.");
+		my $db_records = Checksummer::Database::get_db_records($dbh, $path);
+		if (!$db_records) {
+			error("Unable to load file information from the database.");
 			return undef;
 		}
 
 		my $path_checksums = &check_file($path, $hash_method, $exclusions,
-			$db_checksums);
+			$db_records);
 		if (!$path_checksums) {
 			error("Problem checking path: $path");
 			return undef;
 		}
 
-		if (!Checksummer::Database::update_db_checksums($dbh, $db_checksums,
+		if (!Checksummer::Database::update_db_records($dbh, $db_records,
 				$path_checksums)) {
 			error("Unable to perform database updates.");
 			return undef;
 		}
 
-		# Conditionally return the new checksums. This is useful for testing, but in
-		# real runs this can lead to high memory consumption.
-		if ($should_return_new_checksums) {
+		# Conditionally return the checksums. This is useful for testing, but in real
+		# runs this can lead to high memory consumption.
+		if ($should_return_checksums) {
 			push @new_checksums, @{ $path_checksums };
 		}
 	}
@@ -254,20 +265,26 @@ sub check_files {
 #
 # Parameters:
 #
+# $path, string. Path to the file to check. This function determines how to deal
+# with the file, so it can be any type (directory, regular file, etc).
+#
 # $hash_method, string. sha256 or md5. The hash function to use.
 #
 # $exclusions, array reference. An array of file path prefixes to skip checking.
 #
+# $db_records, hash reference. A hash keyed by file path, including the last
+# known checksum and checksum time.
+#
 # Returns: An array reference, or undef if there was a failure.
 #
 # The array may be empty. If it is not, it will contain one element, a hash
-# reference. This hash reference means the file's checksum changed, and we
-# should store the new checksum.
+# reference.
 #
 # The hash will have keys file (file, string, the path), checksum (its hash,
-# binary), and ok (boolean, true if there was no mismatch problem).
+# binary), checksum_time (unixtime prior to calculating the checksum) and ok
+# (boolean, true if there was no mismatch problem).
 sub check_file {
-	my ($path, $hash_method, $exclusions, $db_checksums) = @_;
+	my ($path, $hash_method, $exclusions, $db_records) = @_;
 
 	# Optimization: I am not checking parameters here any more.
 
@@ -301,7 +318,7 @@ sub check_file {
 			my $full_path = $path . '/' . $file;
 
 			my $file_checksums = &check_file($full_path, $hash_method, $exclusions,
-				$db_checksums);
+				$db_records);
 			if (!$file_checksums) {
 				error("Unable to checksum: $full_path");
 				closedir $dh;
@@ -325,6 +342,10 @@ sub check_file {
 
 	# At this point we are dealing with a regular file.
 
+	# Record the current time prior to calculating the checksum. We use this both
+	# for heuristics and for pruning the database of deleted files.
+	my $checksum_time = time;
+
 	my $checksum = Checksummer::Util::calculate_checksum($path, $hash_method);
 	if (!defined $checksum) {
 		error("Failure building checksum for $path");
@@ -333,18 +354,19 @@ sub check_file {
 
 	# No checksum in the database? Add it. This is the first time we've seen the
 	# file.
-	if (!exists $db_checksums->{ $path }) {
+	if (!exists $db_records->{ $path }) {
 		debug('debug', "No checksum found in database for $path, adding");
-		return [{ file => $path, checksum => $checksum, ok => 1 }];
+		return [{ file => $path, checksum => $checksum,
+				checksum_time => $checksum_time, ok => 1 }];
 	}
 
 	# If checksum matches then there is nothing to do.
-	if ($checksum eq $db_checksums->{ $path }) {
-		return [];
+	if ($checksum eq $db_records->{ $path }{ checksum }) {
+		return [{ file => $path, checksum => $checksum,
+				checksum_time => $checksum_time, ok => 1 }];
 	}
 
-	my $mismatch_result = &checksum_mismatch($path, $checksum,
-		$db_checksums->{ $path });
+	my $mismatch_result = &checksum_mismatch($path, $db_records->{ $path });
 	if ($mismatch_result == -1) {
 		error("Problem checking mismatch for $path");
 		return undef;
@@ -352,10 +374,12 @@ sub check_file {
 
 	# The mismatch looks problematic.
 	if ($mismatch_result == 1) {
-		return [{ file => $path, checksum => $checksum, ok => 0 }];
+		return [{ file => $path, checksum => $checksum,
+				checksum_time => $checksum_time, ok => 0 }];
 	}
 
-	return [{ file => $path, checksum => $checksum, ok => 1 }];
+	return [{ file => $path, checksum => $checksum,
+			checksum_time => $checksum_time, ok => 1 }];
 }
 
 # Some paths/files are excluded by the config (prefixed with !).
@@ -385,52 +409,45 @@ sub is_file_excluded {
 #
 # $file, string. The file's path
 #
-# $checksum, string. The new checksum.
-#
-# $old_checksum, string. The old checksum.
+# $db_record, hash reference. Information from the database about the file. This
+# includes keys checksum (its last computed checksum) and checksum_time (the
+# last time the checksum was computed).
 #
 # Returns: Integer.
 #
 # The integer will be 0 if the mismatch looks fine. It will be 1 if there
 # appears to be a problem. It will be -1 if there was an error.
 sub checksum_mismatch {
-	my ($file, $checksum, $old_checksum) = @_;
+	my ($path, $db_record) = @_;
 
 	# Optimization: I am not checking parameters here any more.
 
-	debug('debug', "CHECKSUM MISMATCH: $file");
+	debug('debug', "CHECKSUM MISMATCH: $path");
 
-	# Check the last modified date It is probable that this mismatch is due to an
-	# actual modification taking place.
-	my $st = File::stat::stat($file);
+	# Find the file's last modified time.
+
+	my $st = File::stat::stat($path);
 	if (!$st) {
 		error("stat failure: $!");
 		return -1;
 	}
 
 	my $mtime = $st->mtime;
-	my $current_time = time;
-	my $one_day_ago = $current_time - 24 * 60 * 60;
 
-	# If the modified time is less than a day ago, then let's assume it was a
-	# regular modification that is OK and we don't need to report it.
+	# If the file's modified time is on or after the last time we calculated its
+	# checksum, then assume there was a legitimate modification.
 	#
-	# Why? Because we expect this script to be run once a day, so changes within
-	# that period are expected.
-	#
-	# If the recorded modified time was more than a day ago, then something might
-	# be fishy. We assume the file should not have changed.
-	#
-	# This is not an absolute. It's possible a file had corruption within the past
-	# day. It is a heuristic.
+	# If the file's modified time is prior to the last time we computed its
+	# checksum, then one of two things may have happened. Either there is file
+	# corruption, or the file was modified and its modified time was set to a time
+	# in the past. The latter is not unheard of, so this is at best a heuristic.
 
-	if ($mtime < $one_day_ago) {
-		info("Checksum mismatch for a file with modified time more than"
-			. " a day ago: $file Last modified: " . scalar(localtime($mtime)));
-		return 1;
+	if ($mtime >= $db_record->{ checksum_time }) {
+		return 0;
 	}
 
-	return 0;
+	info("Problematic checksum mismatch detected. File: $path Modified time: " . scalar(localtime($mtime)) . " Last time checksum computed: " . scalar(localtime($db_record->{ checksum_time })));
+	return 1;
 }
 
 1;

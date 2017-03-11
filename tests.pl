@@ -30,7 +30,7 @@ sub main {
     return 1;
   }
 
-  print "$failures tests failed\n";
+  print "Some tests failed!\n";
   return 0;
 }
 
@@ -231,10 +231,6 @@ sub test_read_config {
 }
 
 sub test_run {
-  my $now = time;
-  my $one_hour_ago = time - 60*60;
-  my $one_week_ago = time - (7*24*60*60);
-
   my $hex_md5sum_of_123 = '202cb962ac59075b964b07152d234b70';
   my $binary_md5sum_of_123 = pack('H*', $hex_md5sum_of_123);
 
@@ -246,9 +242,17 @@ sub test_run {
         paths      => ['/dir1', '/dir2'],
         exclusions => [],
       },
-      db_checksums => [
-        { file => '/dir1/test.txt', checksum => $binary_md5sum_of_123 },
-        { file => '/dir2/test.txt', checksum => $binary_md5sum_of_123 },
+      db_records => [
+        {
+          file          => '/dir1/test.txt',
+          checksum      => $binary_md5sum_of_123,
+          checksum_time => 5,
+        },
+        {
+          file          => '/dir2/test.txt',
+          checksum      => $binary_md5sum_of_123,
+          checksum_time => 5,
+        },
       ],
       files => [
         { path => '/dir1',          exists => 1, dir     => 1 },
@@ -257,6 +261,8 @@ sub test_run {
         { path => '/dir2/test.txt', exists => 1, content => '123' },
       ],
       returned_checksums => [
+        { file => '/dir1/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
+        { file => '/dir2/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
       ],
       want_error => 0,
     },
@@ -268,7 +274,7 @@ sub test_run {
         paths      => ['/dir1', '/dir2'],
         exclusions => [],
       },
-      db_checksums => [
+      db_records => [
       ],
       files => [
         { path => '/dir1',          exists => 1, dir     => 1 },
@@ -284,50 +290,68 @@ sub test_run {
     },
 
     # A set of files, one of which has a checksum mismatch that is not a
-    # problem since the mtime is recent.
+    # problem since the mtime is after the last time we computed the checksum.
     {
       desc   => 'ok checksum mismatch',
       config => {
         paths      => ['/dir1', '/dir2'],
         exclusions => [],
       },
-      db_checksums => [
-        { file => '/dir1/test.txt', checksum => $binary_md5sum_of_123 },
-        { file => '/dir2/test.txt', checksum => 1 },
+      db_records => [
+        {
+          file          => '/dir1/test.txt',
+          checksum      => $binary_md5sum_of_123,
+          checksum_time => 5,
+        },
+        {
+          file          => '/dir2/test.txt',
+          checksum      => 1,
+          checksum_time => 5,
+        },
       ],
       files => [
         { path => '/dir1',          exists => 1, dir     => 1 },
         { path => '/dir1/test.txt', exists => 1, content => '123' },
         { path => '/dir2',          exists => 1, dir     => 1 },
         { path => '/dir2/test.txt', exists => 1, content => '123',
-          mtime => $one_hour_ago, },
+          mtime => 6, },
       ],
       returned_checksums => [
+        { file => '/dir1/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
         { file => '/dir2/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
       ],
       want_error => 0,
     },
 
     # A set of files, one of which has a checksum mismatch that is a problem
-    # since the mtime is long ago.
+    # since the mtime prior to the last time we computed its checksum.
     {
       desc   => 'bad checksum mismatch',
       config => {
         paths      => ['/dir1', '/dir2'],
         exclusions => [],
       },
-      db_checksums => [
-        { file => '/dir1/test.txt', checksum => $binary_md5sum_of_123 },
-        { file => '/dir2/test.txt', checksum => 1 },
+      db_records => [
+        {
+          file          => '/dir1/test.txt',
+          checksum      => $binary_md5sum_of_123,
+          checksum_time => 5,
+        },
+        {
+          file          => '/dir2/test.txt',
+          checksum      => 1,
+          checksum_time => 5,
+        },
       ],
       files => [
         { path => '/dir1',          exists => 1, dir     => 1 },
         { path => '/dir1/test.txt', exists => 1, content => '123' },
         { path => '/dir2',          exists => 1, dir     => 1 },
         { path => '/dir2/test.txt', exists => 1, content => '123',
-          mtime => $one_week_ago },
+          mtime => 4 },
       ],
       returned_checksums => [
+        { file => '/dir1/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
         { file => '/dir2/test.txt', checksum => $hex_md5sum_of_123, ok => 0 },
       ],
       want_error => 0,
@@ -358,13 +382,13 @@ sub test_run {
 
     # Prepend all paths to set in the db with the working dir. This is what
     # we'll see when we run checks shortly.
-    for (my $i = 0; $i < @{ $test->{ db_checksums } }; $i++) {
-      $test->{ db_checksums }[ $i ]{ file } =
-        $working_dir . $test->{ db_checksums }[ $i ]{ file };
+    for (my $i = 0; $i < @{ $test->{ db_records } }; $i++) {
+      $test->{ db_records }[ $i ]{ file } =
+        $working_dir . $test->{ db_records }[ $i ]{ file };
     }
 
-    if (!Checksummer::Database::update_db_checksums($dbh, $current_checksums,
-        $test->{ db_checksums })) {
+    if (!Checksummer::Database::update_db_records($dbh, $current_checksums,
+        $test->{ db_records })) {
       print "test_run: Unable to perform database updates.\n";
       $failures++;
       unlink $db_file;
@@ -438,28 +462,21 @@ sub test_run {
 }
 
 sub test_check_file {
-  my $now = time;
-  my $one_hour_ago = time - 60*60;
-  my $one_week_ago = time - (7*24*60*60);
-
   my @tests = (
     # The file does not exist. No error as we check if the file is readable and
-    # do not raise an error if it is not.
+    # currently we do not raise an error if it is not.
     {
       desc  => 'file does not exist',
       file  => '/test.txt',
       files => [
         {
           path   => '/test.txt',
-          dir    => 0,
-          exists => 0,
-          mtime  => $one_hour_ago,
         },
       ],
-      db_checksums => {},
-      exclusions   => [],
-      want_error   => 0,
-      output       => [],
+      db_records => {},
+      exclusions => [],
+      want_error => 0,
+      output     => [],
     },
 
     # Regular file. Checksums match.
@@ -469,19 +486,27 @@ sub test_check_file {
       files => [
         {
           path    => '/test.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_hour_ago,
+          mtime   => 1,
           content => "123",
         },
       ],
-      db_checksums => {
-        # checksum of 123
-        '/test.txt' => '202cb962ac59075b964b07152d234b70',
+      db_records => {
+        '/test.txt' => {
+          # checksum of 123
+          checksum      => '202cb962ac59075b964b07152d234b70',
+          checksum_time => 1,
+        },
       },
       exclusions => [],
       want_error => 0,
-      output     => [],
+      output     => [
+        {
+          file     => '/test.txt',
+          checksum => '202cb962ac59075b964b07152d234b70',
+          ok       => 1,
+        },
+      ],
     },
 
     # Regular file. Checksum is not yet in the database.
@@ -491,13 +516,12 @@ sub test_check_file {
       files => [
         {
           path    => '/test.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_hour_ago,
+          mtime   => 1,
           content => "123",
         },
       ],
-      db_checksums => {
+      db_records => {
       },
       exclusions => [],
       want_error => 0,
@@ -510,21 +534,24 @@ sub test_check_file {
       ],
     },
 
-    # Regular file. Checksum mismatch, but recently enough that it is okay.
+    # Regular file. Checksum mismatch, but it's since we last computed the
+    # checksum, so it's okay.
     {
       desc  => 'checksum mismatch, but ok',
       file  => '/test.txt',
       files => [
         {
           path    => '/test.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_hour_ago,
+          mtime   => 5,
           content => "123",
         },
       ],
-      db_checksums => {
-        '/test.txt' => 'ff',
+      db_records => {
+        '/test.txt' => {
+          checksum      => 'ff',
+          checksum_time => 4,
+        },
       },
       exclusions => [],
       want_error => 0,
@@ -537,22 +564,24 @@ sub test_check_file {
       ],
     },
 
-    # Regular file. Checksum mismatch, and and it is long enough ago that it is
-    # a problem.
+    # Regular file. Checksum mismatch, and the mtime is prior to the last time
+    # we calculated the checksum, so this is problematic.
     {
       desc  => 'checksum mismatch, and not ok',
       file  => '/test.txt',
       files => [
         {
           path    => '/test.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 5,
           content => "123",
         },
       ],
-      db_checksums => {
-        '/test.txt' => 'ff',
+      db_records => {
+        '/test.txt' => {
+          checksum      => 'ff',
+          checksum_time => 10,
+        },
       },
       exclusions => [],
       want_error => 0,
@@ -577,26 +606,40 @@ sub test_check_file {
         },
         {
           path    => '/testdir/test.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 5,
           content => "123",
         },
         {
           path    => '/testdir/test2.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 6,
           content => "123",
         },
       ],
-      db_checksums => {
-        '/testdir/test.txt'  => '202cb962ac59075b964b07152d234b70',
-        '/testdir/test2.txt' => '202cb962ac59075b964b07152d234b70',
+      db_records => {
+        '/testdir/test.txt' => {
+          checksum      => '202cb962ac59075b964b07152d234b70',
+          checksum_time => 5,
+        },
+        '/testdir/test2.txt' => {
+          checksum      => '202cb962ac59075b964b07152d234b70',
+          checksum_time => 6,
+        },
       },
       exclusions => [],
       want_error => 0,
       output     => [
+        {
+          file     => '/testdir/test.txt',
+          checksum => '202cb962ac59075b964b07152d234b70',
+          ok       => 1,
+        },
+        {
+          file     => '/testdir/test2.txt',
+          checksum => '202cb962ac59075b964b07152d234b70',
+          ok       => 1,
+        },
       ],
     },
 
@@ -612,33 +655,46 @@ sub test_check_file {
         },
         {
           path    => '/testdir/test.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 5,
           content => "123",
         },
         {
           path    => '/testdir/test2.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 6,
           content => "123",
         },
         {
           path    => '/testdir/test3.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 7,
           content => "123",
         },
       ],
-      db_checksums => {
-        '/testdir/test.txt'  => '202cb962ac59075b964b07152d234b70',
-        '/testdir/test2.txt' => '202cb962ac59075b964b07152d234b70',
+      db_records => {
+        '/testdir/test.txt' => {
+          checksum      => '202cb962ac59075b964b07152d234b70',
+          checksum_time => 5,
+        },
+        '/testdir/test2.txt' => {
+          checksum      => '202cb962ac59075b964b07152d234b70',
+          checksum_time => 6,
+        },
       },
       exclusions => [],
       want_error => 0,
       output     => [
+        {
+          file     => '/testdir/test.txt',
+          checksum => '202cb962ac59075b964b07152d234b70',
+          ok       => 1,
+        },
+        {
+          file     => '/testdir/test2.txt',
+          checksum => '202cb962ac59075b964b07152d234b70',
+          ok       => 1,
+        },
         {
           file     => '/testdir/test3.txt',
           checksum => '202cb962ac59075b964b07152d234b70',
@@ -647,8 +703,8 @@ sub test_check_file {
       ],
     },
 
-    # Directory. All file checksums match except one, but recently enough that
-    # it is okay.
+    # Directory. All file checksums match except one. The file changed since we
+    # computed the checksum, so it is okay.
     {
       desc  => 'directory, checksums match except one different but ok',
       file  => '/testdir',
@@ -660,26 +716,35 @@ sub test_check_file {
         },
         {
           path    => '/testdir/test.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 5,
           content => "123",
         },
         {
           path    => '/testdir/test2.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_hour_ago,
+          mtime   => 6,
           content => "123",
         },
       ],
-      db_checksums => {
-        '/testdir/test.txt'  => '202cb962ac59075b964b07152d234b70',
-        '/testdir/test2.txt' => 'ff',
+      db_records => {
+        '/testdir/test.txt' => {
+          checksum      => '202cb962ac59075b964b07152d234b70',
+          checksum_time => 5,
+        },
+        '/testdir/test2.txt' => {
+          checksum      => 'ff',
+          checksum_time => 5
+        },
       },
       exclusions => [],
       want_error => 0,
       output     => [
+        {
+          file     => '/testdir/test.txt',
+          checksum => '202cb962ac59075b964b07152d234b70',
+          ok       => 1,
+        },
         {
           file     => '/testdir/test2.txt',
           checksum => '202cb962ac59075b964b07152d234b70',
@@ -688,8 +753,8 @@ sub test_check_file {
       ],
     },
 
-    # Directory. All file checksums match except one, and it is long enough ago
-    # that it is a problem.
+    # Directory. All file checksums match except one, and its mtime is prior to
+    # the last time we computed its checksum, so it is a problem.
     {
       desc  => 'directory, one checksum different, and it is a problem',
       file  => '/testdir',
@@ -701,26 +766,35 @@ sub test_check_file {
         },
         {
           path    => '/testdir/test.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 5,
           content => "123",
         },
         {
           path    => '/testdir/test2.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 6,
           content => "123",
         },
       ],
-      db_checksums => {
-        '/testdir/test.txt'  => '202cb962ac59075b964b07152d234b70',
-        '/testdir/test2.txt' => 'ff',
+      db_records => {
+        '/testdir/test.txt' => {
+          checksum      => '202cb962ac59075b964b07152d234b70',
+          checksum_time => 5,
+        },
+        '/testdir/test2.txt' => {
+          checksum      => 'ff',
+          checksum_time => 10,
+        },
       },
       exclusions => [],
       want_error => 0,
       output     => [
+        {
+          file     => '/testdir/test.txt',
+          checksum => '202cb962ac59075b964b07152d234b70',
+          ok       => 1,
+        },
         {
           file     => '/testdir/test2.txt',
           checksum => '202cb962ac59075b964b07152d234b70',
@@ -736,12 +810,11 @@ sub test_check_file {
       files => [
         {
           path    => '/testlink',
-          dir     => 0,
           symlink => 1,
           exists  => 1,
         },
       ],
-      db_checksums => {
+      db_records => {
       },
       exclusions => [],
       want_error => 0,
@@ -749,10 +822,10 @@ sub test_check_file {
       ],
     },
 
-    # Checksum mismatch, long enough ago that it is a problem. But the file is
-    # excluded.
+    # A file is not in the database, and it's excluded. We should not see a
+    # checksum for it.
     {
-      desc  => 'directory, one checksum different, and it is a problem',
+      desc  => 'file is excluded',
       file  => '/testdir',
       files => [
         {
@@ -762,26 +835,31 @@ sub test_check_file {
         },
         {
           path    => '/testdir/test.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 5,
           content => "123",
         },
         {
           path    => '/testdir/test2.txt',
-          dir     => 0,
           exists  => 1,
-          mtime   => $one_week_ago,
+          mtime   => 6,
           content => "123",
         },
       ],
-      db_checksums => {
-        '/testdir/test.txt'  => '202cb962ac59075b964b07152d234b70',
-        '/testdir/test2.txt' => 'ff',
+      db_records => {
+        '/testdir/test.txt' => {
+          checksum      => '202cb962ac59075b964b07152d234b70',
+          checksum_time => 5,
+        },
       },
       exclusions => ['/testdir/test2.txt'],
       want_error => 0,
       output     => [
+        {
+          file     => '/testdir/test.txt',
+          checksum => '202cb962ac59075b964b07152d234b70',
+          ok       => 1,
+        },
       ],
     },
   );
@@ -800,13 +878,17 @@ sub test_check_file {
       next;
     }
 
-    # We need to prefix the checksums from the database with the working
-    # directory. We also must convert the checksum from hex to binary.
-    my %db_checksums;
-    foreach my $file (keys %{ $test->{ db_checksums } }) {
+    # We need to prefix the files for the database with the working directory.
+    # We also must convert the checksum from hex to binary.
+    my %db_records;
+    foreach my $file (keys %{ $test->{ db_records } }) {
       my $path = $working_dir . $file;
-      my $checksum = pack('H*', $test->{ db_checksums }{ $file });
-      $db_checksums{ $path } = $checksum;
+      my $checksum = pack('H*', $test->{ db_records }{ $file }{ checksum });
+
+      $db_records{ $path } = {
+        checksum      => $checksum,
+        checksum_time => $test->{ db_records }{ $file }{ checksum_time },
+      };
     }
 
     # Prefix exclusions with the working dir path.
@@ -822,7 +904,7 @@ sub test_check_file {
     my $start_file = $working_dir . $test->{ file };
 
     my $r = Checksummer::check_file($start_file, $hash_method, \@exclusions,
-      \%db_checksums);
+      \%db_records);
     File::Path::remove_tree($working_dir);
 
     if ($test->{ want_error }) {
@@ -955,9 +1037,12 @@ sub checksums_are_equal {
     return 0;
   }
 
+  my @sorted_returned_checksums = sort { $a->{ file } cmp $b->{ file } }
+    @{ $returned_checksums };
+
   for (my $i = 0; $i < @{ $test_checksums }; $i++) {
     my $wanted = $test_checksums->[ $i ];
-    my $got = $returned_checksums->[ $i ];
+    my $got = $sorted_returned_checksums[ $i ];
 
     my $wanted_file = $working_dir . $wanted->{ file };
     if ($got->{ file } ne $wanted_file) {
@@ -970,6 +1055,10 @@ sub checksums_are_equal {
       print "checksums_are_equal: file $i checksum is $got_sum, wanted $wanted->{ checksum }\n";
       return 0;
     }
+
+    # We shouldn't need to compare the checksum_time fields. This is because
+    # each time we calculate them, the time will be 'now', so the time we
+    # received will always be the current time.
 
     if ($got->{ ok } != $wanted->{ ok }) {
       print "checksums_are_equal: file $i ok is $got->{ ok }, wanted $wanted->{ ok }\n";
@@ -1018,41 +1107,35 @@ sub test_is_file_excluded {
 }
 
 sub test_checksum_mismatch {
-  my $now = time;
-  my $one_hour_ago = time - 60*60;
-  my $one_week_ago = time - (7*24*60*60);
-
   my @tests = (
-    # The mtime is recent enough that the mismatch is okay.
+    # The change is fine. The mtime is after the last time we computed the
+    # checksum.
     {
-      file_exists  => 1,
-      mtime        => $one_hour_ago,
-      output       => 0,
+      file_exists   => 1,
+      checksum_time => 5,
+      mtime         => 6,
+      output        => 0,
     },
 
-    # The mtime is long enough ago that the mismatch is a problem.
+    # The change is a problem. The mtime is prior to the last time we computed
+    # the checksum.
     {
-      file_exists  => 1,
-      mtime        => $one_week_ago,
-      output       => 1,
+      file_exists   => 1,
+      checksum_time => 5,
+      mtime         => 4,
+      output        => 1,
     },
 
     # Unable to stat the file.
     {
-      file_exists  => 0,
-      mtime        => $one_week_ago,
-      output       => -1,
+      file_exists => 0,
+      output      => -1,
     },
   );
 
   my $failures = 0;
 
   my $tmpfile = File::Temp::tmpnam();
-
-  # The checksums are irrelevant. The function uses them for reporting only. If
-  # it is called, then checksums must have been different.
-  my $new_checksum = '123';
-  my $old_checksum = '456';
 
   foreach my $test (@tests) {
     if ($test->{ file_exists }) {
@@ -1070,8 +1153,10 @@ sub test_checksum_mismatch {
       }
     }
 
-    my $r = Checksummer::checksum_mismatch($tmpfile, $new_checksum,
-      $old_checksum);
+    my $db_record = { checksum_time => $test->{ checksum_time } };
+
+    my $r = Checksummer::checksum_mismatch($tmpfile, $db_record);
+
     unlink $tmpfile if $test->{ file_exists };
 
     if ($r != $test->{ output }) {

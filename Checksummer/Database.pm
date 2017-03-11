@@ -59,11 +59,16 @@ sub create_schema_if_needed {
 
 	info("Creating table [$table_name]");
 
+	# Explanation of columns:
+	# file: Absolute path to the file.
+	# checksum: Binary checksum of the file.
+	# checksum_time: Unixtime when the checksum was calculated.
 	my $table_sql = q/
 CREATE TABLE checksums (
   id INTEGER PRIMARY KEY,
   file NOT NULL,
   checksum NOT NULL,
+  checksum_time INTEGER NOT NULL,
   UNIQUE(file)
 )
 /;
@@ -74,6 +79,7 @@ CREATE TABLE checksums (
 		return 0;
 	}
 
+	# We query subsets of rows based on the file path.
 	my $index_sql = q/CREATE INDEX file_idx ON checksums (file)/;
 
 	$r = &db_manipulate($dbh, $index_sql, []);
@@ -116,7 +122,7 @@ sub table_exists {
 	# Create the table
 }
 
-# Load all current checksums from the database into memory.
+# Load all current records about files from the database.
 #
 # Keyed by file path.
 #
@@ -128,9 +134,9 @@ sub table_exists {
 #
 # Returns: A hash reference, or undef if failure.
 #
-# The hash will have keys that are filenames, with the values being the checksum
-# for the file.
-sub get_db_checksums {
+# The hash will have keys that are filenames. The values will be a hash
+# reference with keys checksum and checksum_time.
+sub get_db_records {
 	my ($dbh, $path) = @_;
 	if (!$dbh) {
 		error("You must provide a database handle");
@@ -146,7 +152,10 @@ sub get_db_checksums {
 	$path_sql =~ s/%/\\%/g;
 	$path_sql .= '/%';
 
-	my $sql = q/SELECT file, checksum FROM checksums WHERE file LIKE ? ESCAPE '\\'/;
+	my $sql = q/
+	SELECT file, checksum, checksum_time
+	FROM checksums
+	WHERE file LIKE ? ESCAPE '\\'/;
 	my @params = ($path_sql);
 
 	my $rows = &db_select($dbh, $sql, \@params);
@@ -158,7 +167,10 @@ sub get_db_checksums {
 	my %checksums;
 
 	foreach my $row (@{ $rows }) {
-		$checksums{ $row->[0] } = $row->[1];
+		$checksums{ $row->[0] } = {
+			checksum      => $row->[1],
+			checksum_time => $row->[2],
+		},
 	}
 
 	return \%checksums;
@@ -166,15 +178,20 @@ sub get_db_checksums {
 
 # Bulk INSERT/UPDATE the database with the files and checksums we have found
 # either new or changed.
-sub update_db_checksums {
-	my ($dbh, $old_checksums, $new_checksums) = @_;
-	if (!$dbh || !$old_checksums || !$new_checksums) {
+sub update_db_records {
+	my ($dbh, $old_records, $new_records) = @_;
+	if (!$dbh || !$old_records|| !$new_records) {
 		error("Invalid parameter");
 		return 0;
 	}
 
-	my $insert_sql = q/INSERT INTO checksums (file, checksum) VALUES(?, ?)/;
-	my $update_sql = q/UPDATE checksums SET checksum = ? WHERE file = ?/;
+	my $insert_sql = q/
+	INSERT INTO checksums
+	(file, checksum, checksum_time) VALUES(?, ?, ?)/;
+	my $update_sql = q/
+	UPDATE checksums
+	SET checksum = ?, checksum_time = ?
+	WHERE file = ?/;
 
 	my $insert_sth = $dbh->prepare($insert_sql);
 	if (!$insert_sth) {
@@ -193,14 +210,13 @@ sub update_db_checksums {
 		return 0;
 	}
 
-	foreach my $file_and_checksum (@{ $new_checksums }) {
-		my $file = $file_and_checksum->{ file };
-		my $checksum = $file_and_checksum->{ checksum };
-
-		if (exists $old_checksums->{ $file }) {
-			my $update_res = $update_sth->execute($checksum, $file);
+	foreach my $c (@{ $new_records }) {
+		if (exists $old_records->{ $c->{ file } }) {
+			my $update_res = $update_sth->execute($c->{ checksum },
+				$c->{ checksum_time }, $c->{ file });
 			if (!defined $update_res) {
-				error("Unable to update database for file $file: " . $update_sth->errstr);
+				error("Unable to update database for file $c->{ file }: "
+					. $update_sth->errstr);
 				$dbh->rollback;
 				return 0;
 			}
@@ -208,9 +224,10 @@ sub update_db_checksums {
 			next;
 		}
 
-		my $insert_res = $insert_sth->execute($file, $checksum);
+		my $insert_res = $insert_sth->execute($c->{ file }, $c->{ checksum },
+			$c->{ checksum_time });
 		if (!defined $insert_res) {
-			error("Unable to insert into database for file $file: " .
+			error("Unable to insert into database for file $c->{ file }: " .
 				$insert_sth->errstr);
 			$dbh->rollback;
 			return 0;
@@ -221,6 +238,35 @@ sub update_db_checksums {
 		error("Unable to commit transaction: " . $dbh->errstr);
 		return 0;
 	}
+
+	return 1;
+}
+
+# We just recomputed checksums for all files that currently exist. There may be
+# files in the database that were deleted. Delete any rows that have times prior
+# to the given time. The given time should be prior to computing the new set of
+# checksums.
+sub prune_database_of_deleted_files {
+	my ($dbh, $unixtime) = @_;
+	if (!$dbh || !defined $unixtime) {
+		error("Invalid parameter");
+		return 0;
+	}
+
+	my $sql = q/DELETE FROM checksums WHERE checksum_time < ?/;
+
+	my $rows_affected = $dbh->do($sql);
+	if (!defined $rows_affected) {
+		error("Unable to delete rows: " . $dbh->errstr);
+		return 0;
+	}
+
+	# DBI returns 0 as 0E0.
+	if ($rows_affected == 0) {
+		$rows_affected = 0;
+	}
+
+	info("Pruned $rows_affected rows.");
 
 	return 1;
 }
