@@ -39,14 +39,3 @@ level. This program can help if that is not an option.
 
   * It creates the database automatically if it does not exist.
   * Run it periodically, such as from cron, to monitor files.
-
-
-# Database interaction
-The program creates and updates the database without any manual interaction.
-
-If you want to manually examine checksums in the database, this query may be
-useful:
-
-sqlite> SELECT file, hex(checksum) FROM checksums;
-
-This is to show the checksum as hex characters rather than the raw binary data.
