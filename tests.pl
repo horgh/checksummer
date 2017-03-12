@@ -1183,6 +1183,10 @@ sub test_checksum_mismatch {
 sub test_database {
   my $failures = 0;
 
+  if (!&test_escape_like_parameter) {
+    $failures++;
+  }
+
   if (!&test_prune_database) {
     $failures++;
   }
@@ -1309,6 +1313,45 @@ sub test_prune_database {
   }
 
   print "$failures/" . scalar(@tests) . " prune_database tests failed\n";
+  return 0;
+}
+
+sub test_escape_like_parameter {
+  my @tests = (
+    {
+      input  => 'abc',
+      output => 'abc',
+    },
+    {
+      input  => 'ab%_\\c',
+      output => 'ab\\%\\_\\\\c',
+    },
+    {
+      input  => '%_\\',
+      output => '\\%\\_\\\\',
+    },
+    {
+      input  => '%_\\%_\\',
+      output => '\\%\\_\\\\\\%\\_\\\\',
+    },
+  );
+
+  my $failures = 0;
+
+  foreach my $test (@tests) {
+    my $output = Checksummer::Database::escape_like_parameter($test->{ input });
+    if ($output ne $test->{ output }) {
+      print "FAILURE: escape_like_parameter($test->{ input }) = $output, wanted $test->{ output }\n";
+      $failures++;
+      next
+    }
+  }
+
+  if ($failures == 0) {
+    return 1;
+  }
+
+  print "TEST FAILURES: $failures/" . scalar(@tests) . " escape_like_parameter tests failed\n";
   return 0;
 }
 

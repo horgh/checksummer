@@ -146,9 +146,7 @@ sub get_db_records {
 	# Let path be empty. This retrieves all.
 	$path = '' if !defined $path;
 
-	my $path_sql = $path;
-	$path_sql =~ s/_/\\_/g;
-	$path_sql =~ s/%/\\%/g;
+	my $path_sql = &escape_like_parameter($path);
 	$path_sql .= '/%';
 
 	my $sql = q/
@@ -173,6 +171,22 @@ sub get_db_records {
 	}
 
 	return \%checksums;
+}
+
+# LIKE treats certain characters specially. Escape them.
+#
+# This assumes the escape character is \.
+sub escape_like_parameter {
+	my ($s) = @_;
+	if (!defined $s) {
+		return '';
+	}
+
+	$s =~ s/\\/\\\\/g;
+	$s =~ s/_/\\_/g;
+	$s =~ s/%/\\%/g;
+
+	return $s;
 }
 
 # Bulk INSERT/UPDATE the database with the files and checksums we have found
