@@ -8,18 +8,20 @@ alert of corruption.
 Its main heuristic relies on checksums. When run, it computes checksums for all
 files under configured directories. It compares the newly computed checksum
 with one found in a database for the file. This reveals whether the file
-changed since the last run. If the file changed, it uses the file's
-modification time to decide whether the modification is legitimate. If the file
-changed and its modification time is prior to when checksummer last computed
-the checksum, then this is an indication the file is potentially suffering
-corruption. If the modification time is after the last time the program
-computed the checksum, then it assumes the modification was legitimate.
+changed since the last run.
+
+If the file changed, checksummer uses the file's modification time to
+decide whether the modification is legitimate. If the file changed and its
+modification time is prior to when checksummer last computed the checksum,
+then this is an indication the file is potentially suffering corruption. If
+the modification time is after the last time the program computed the
+checksum, then it assumes the modification was legitimate.
 
 To best benefit from these checks, you must regularly run checksummer to monitor
 your files.
 
-A better solution than using this program would be to use a filesystem such as
-[ZFS](https://en.wikipedia.org/wiki/ZFS) which checksums at the filesystem
+A better solution than using this program would be to use a filesystem such
+as [ZFS](https://en.wikipedia.org/wiki/ZFS) to checksum at the filesystem
 level. This program can help if that is not an option.
 
 

@@ -51,7 +51,8 @@ sub read_config {
 	my @paths;
 	my @exclusions;
 
-	while (my $line = <$fh>) {
+	while (!eof $fh) {
+		my $line = <$fh>;
 		if (!defined $line) {
 			error("failed reading line: $!");
 			close $fh;
@@ -188,14 +189,18 @@ sub run {
 # For every path we will recursively descend and calculate a checksum for each
 # file.
 #
-# If the file exists in the database, compare the checksum with found checksum.
+# Look up information about the file in the database.
 #
-# If not match, warn.
+# If the file does not exist in the database, add a record for it.
 #
-# If it does not exist in the database, add it.
+# If the file exists in the database, compare the current checksum with the
+# database checksum.
 #
-# This function is mainly a wrapper around check_file(). It exists mainly to
-# be able to log a little differently for the top level paths.
+# If the checksums do not match, analyze whether the mismatch looks valid. If
+# it doesn't, warn there is a problem.
+#
+# This function is mainly a wrapper around check_file(). It exists to be able to
+# log differently for the top level paths.
 #
 # Parameters:
 #
@@ -216,6 +221,8 @@ sub run {
 # files under the given path will be present, no matter whether the file's
 # checksum changed or not. For information about the format of the hash, see
 # check_file().
+#
+# If you don't ask to return checksums, the array reference will be empty.
 sub check_files {
 	my ($dbh, $paths, $hash_method, $exclusions,
 		$should_return_checksums) = @_;
@@ -231,8 +238,8 @@ sub check_files {
 		info("Checking [$path]...");
 
 		# As a memory optimization, load checksums for files from the database
-		# under each path rather than all checkums at once. Then update the database
-		# with any new checksums under this path, and repeat.
+		# under each path rather than all checkums at once. Then update the
+		# database with any new checksums under this path, and repeat.
 
 		my $db_records = Checksummer::Database::get_db_records($dbh, $path);
 		if (!$db_records) {
@@ -253,8 +260,8 @@ sub check_files {
 			return undef;
 		}
 
-		# Conditionally return the checksums. This is useful for testing, but in real
-		# runs this can lead to high memory consumption.
+		# Conditionally return the checksums. This is useful for testing, but in
+		# real runs this can lead to high memory consumption.
 		if ($should_return_checksums) {
 			push @new_checksums, @{ $path_checksums };
 		}
@@ -426,7 +433,7 @@ sub checksum_mismatch {
 
 	debug('debug', "CHECKSUM MISMATCH: $path");
 
-	# Find the file's last modified time.
+	# Find the file's modified time.
 
 	my $st = File::stat::stat($path);
 	if (!$st) {
@@ -449,6 +456,7 @@ sub checksum_mismatch {
 	}
 
 	info("Problematic checksum mismatch detected. File: $path Modified time: " . scalar(localtime($mtime)) . " Last time checksum computed: " . scalar(localtime($db_record->{ checksum_time })));
+
 	return 1;
 }
 

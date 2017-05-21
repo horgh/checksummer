@@ -60,15 +60,23 @@ sub create_schema_if_needed {
 	info("Creating table [$table_name]");
 
 	# Explanation of columns:
-	# file: Absolute path to the file.
-	# checksum: Binary checksum of the file.
-	# checksum_time: Unixtime when the checksum was calculated.
+	# - file: Absolute path to the file.
+	# - checksum: Binary checksum of the file.
+	# - checksum_time: Unixtime when the checksum was calculated. We use this to
+	#   know that the file can be pruned from the database if it gets deleted.
+	#   TODO: This can be removed. I believe we can do pruning without it.
+	#   Previously I used it in the heuristics for deciding whether a checksum
+	#   change was problematic, but no longer.
+	# - modified_time: Unixtime of the file last time we calculated its checksum.
+	#   We use this for our heuristics around whether a checksum change is a
+	#   problem.
 	my $table_sql = q/
 CREATE TABLE checksums (
   id INTEGER PRIMARY KEY,
   file NOT NULL,
   checksum NOT NULL,
   checksum_time INTEGER NOT NULL,
+  mtime INTEGER NOT NULL
   UNIQUE(file)
 )
 /;
