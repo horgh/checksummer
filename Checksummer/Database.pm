@@ -264,9 +264,9 @@ sub update_db_records {
 }
 
 # We just recomputed checksums for all files that currently exist. There may be
-# files in the database that were deleted. Delete any rows that have times prior
-# to the given time. The given time should be prior to computing the new set of
-# checksums.
+# files in the database that were deleted. Delete any rows that have times
+# prior to the given time. The given time should be prior to computing the new
+# set of checksums.
 sub prune_database {
 	my ($dbh, $unixtime) = @_;
 	if (!$dbh || !defined $unixtime) {

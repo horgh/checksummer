@@ -199,8 +199,8 @@ sub run {
 # If the checksums do not match, analyze whether the mismatch looks valid. If
 # it doesn't, warn there is a problem.
 #
-# This function is mainly a wrapper around check_file(). It exists to be able to
-# log differently for the top level paths.
+# This function is mainly a wrapper around check_file(). It exists to be able
+# to log differently for the top level paths.
 #
 # Parameters:
 #
@@ -216,11 +216,11 @@ sub run {
 #
 # Returns: An array reference, or undef if failure.
 #
-# If you ask to return checksums, then the array is filled with hash references.
-# Each hash reference provides the file and current checksum for the file. All
-# files under the given path will be present, no matter whether the file's
-# checksum changed or not. For information about the format of the hash, see
-# check_file().
+# If you ask to return checksums, then the array is filled with hash
+# references. Each hash reference provides the file and current checksum for
+# the file. All files under the given path will be present, no matter whether
+# the file's checksum changed or not. For information about the format of the
+# hash, see check_file().
 #
 # If you don't ask to return checksums, the array reference will be empty.
 sub check_files {
@@ -274,12 +274,13 @@ sub check_files {
 #
 # Parameters:
 #
-# $path, string. Path to the file to check. This function determines how to deal
-# with the file, so it can be any type (directory, regular file, etc).
+# $path, string. Path to the file to check. This function determines how to
+# deal with the file, so it can be any type (directory, regular file, etc).
 #
 # $hash_method, string. sha256 or md5. The hash function to use.
 #
-# $exclusions, array reference. An array of file path prefixes to skip checking.
+# $exclusions, array reference. An array of file path prefixes to skip
+# checking.
 #
 # $db_records, hash reference. A hash keyed by file path, including the last
 # known checksum and checksum time.
@@ -418,9 +419,9 @@ sub is_file_excluded {
 #
 # $file, string. The file's path
 #
-# $db_record, hash reference. Information from the database about the file. This
-# includes keys checksum (its last computed checksum) and checksum_time (the
-# last time the checksum was computed).
+# $db_record, hash reference. Information from the database about the file.
+# This includes keys checksum (its last computed checksum) and checksum_time
+# (the last time the checksum was computed).
 #
 # Returns: Integer.
 #
@@ -448,8 +449,9 @@ sub checksum_mismatch {
 	#
 	# If the file's modified time is prior to the last time we computed its
 	# checksum, then one of two things may have happened. Either there is file
-	# corruption, or the file was modified and its modified time was set to a time
-	# in the past. The latter is not unheard of, so this is at best a heuristic.
+	# corruption, or the file was modified and its modified time was set to a
+	# time in the past. The latter is not unheard of, so this is at best a
+	# heuristic.
 
 	if ($mtime >= $db_record->{ checksum_time }) {
 		return 0;
