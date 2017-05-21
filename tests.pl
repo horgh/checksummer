@@ -252,11 +252,13 @@ sub test_run {
           file          => '/dir1/test.txt',
           checksum      => $binary_md5sum_of_123,
           checksum_time => 5,
+					modified_time => 4,
         },
         {
           file          => '/dir2/test.txt',
           checksum      => $binary_md5sum_of_123,
           checksum_time => 5,
+					modified_time => 4,
         },
       ],
       files => [
@@ -307,11 +309,13 @@ sub test_run {
           file          => '/dir1/test.txt',
           checksum      => $binary_md5sum_of_123,
           checksum_time => 5,
+					modified_time => 4,
         },
         {
           file          => '/dir2/test.txt',
           checksum      => 1,
           checksum_time => 5,
+					modified_time => 4,
         },
       ],
       files => [
@@ -329,7 +333,7 @@ sub test_run {
     },
 
     # A set of files, one of which has a checksum mismatch that is a problem
-    # since the mtime prior to the last time we computed its checksum.
+    # since the mtime is the same as the last time we checked it.
     {
       desc   => 'bad checksum mismatch',
       config => {
@@ -341,11 +345,13 @@ sub test_run {
           file          => '/dir1/test.txt',
           checksum      => $binary_md5sum_of_123,
           checksum_time => 5,
+					modified_time => 4,
         },
         {
           file          => '/dir2/test.txt',
           checksum      => 1,
           checksum_time => 5,
+					modified_time => 4,
         },
       ],
       files => [
@@ -502,6 +508,7 @@ sub test_check_file {
           # checksum of 123
           checksum      => '202cb962ac59075b964b07152d234b70',
           checksum_time => 1,
+					modified_time => 1,
         },
       },
       exclusions => [],
@@ -540,8 +547,8 @@ sub test_check_file {
       ],
     },
 
-    # Regular file. Checksum mismatch, but it's since we last computed the
-    # checksum, so it's okay.
+    # Regular file. Checksum mismatch, but it's ok. The modified time is after
+		# the last we know about.
     {
       desc  => 'checksum mismatch, but ok',
       file  => '/test.txt',
@@ -557,6 +564,7 @@ sub test_check_file {
         '/test.txt' => {
           checksum      => 'ff',
           checksum_time => 4,
+					modified_time => 4,
         },
       },
       exclusions => [],
@@ -570,8 +578,8 @@ sub test_check_file {
       ],
     },
 
-    # Regular file. Checksum mismatch, and the mtime is prior to the last time
-    # we calculated the checksum, so this is problematic.
+    # Regular file. Checksum mismatch, and the mtime is prior to the last we
+		# know about. This is problematic.
     {
       desc  => 'checksum mismatch, and not ok',
       file  => '/test.txt',
@@ -587,6 +595,7 @@ sub test_check_file {
         '/test.txt' => {
           checksum      => 'ff',
           checksum_time => 10,
+					modified_time => 6,
         },
       },
       exclusions => [],
@@ -627,10 +636,12 @@ sub test_check_file {
         '/testdir/test.txt' => {
           checksum      => '202cb962ac59075b964b07152d234b70',
           checksum_time => 5,
+					modified_time => 5,
         },
         '/testdir/test2.txt' => {
           checksum      => '202cb962ac59075b964b07152d234b70',
           checksum_time => 6,
+					modified_time => 6,
         },
       },
       exclusions => [],
@@ -682,10 +693,12 @@ sub test_check_file {
         '/testdir/test.txt' => {
           checksum      => '202cb962ac59075b964b07152d234b70',
           checksum_time => 5,
+					modified_time => 5,
         },
         '/testdir/test2.txt' => {
           checksum      => '202cb962ac59075b964b07152d234b70',
           checksum_time => 6,
+					modified_time => 6,
         },
       },
       exclusions => [],
@@ -710,7 +723,7 @@ sub test_check_file {
     },
 
     # Directory. All file checksums match except one. The file changed since we
-    # computed the checksum, so it is okay.
+		# last saw it, so it is okay.
     {
       desc  => 'directory, checksums match except one different but ok',
       file  => '/testdir',
@@ -737,10 +750,12 @@ sub test_check_file {
         '/testdir/test.txt' => {
           checksum      => '202cb962ac59075b964b07152d234b70',
           checksum_time => 5,
+					modified_time => 5,
         },
         '/testdir/test2.txt' => {
           checksum      => 'ff',
-          checksum_time => 5
+          checksum_time => 5,
+					modified_time => 5,
         },
       },
       exclusions => [],
@@ -759,8 +774,8 @@ sub test_check_file {
       ],
     },
 
-    # Directory. All file checksums match except one, and its mtime is prior to
-    # the last time we computed its checksum, so it is a problem.
+    # Directory. All file checksums match except one, and its mtime is the same
+		# as the last time. This is a problem.
     {
       desc  => 'directory, one checksum different, and it is a problem',
       file  => '/testdir',
@@ -787,10 +802,12 @@ sub test_check_file {
         '/testdir/test.txt' => {
           checksum      => '202cb962ac59075b964b07152d234b70',
           checksum_time => 5,
+					modified_time => 5,
         },
         '/testdir/test2.txt' => {
           checksum      => 'ff',
           checksum_time => 10,
+					modified_time => 6,
         },
       },
       exclusions => [],
@@ -856,6 +873,7 @@ sub test_check_file {
         '/testdir/test.txt' => {
           checksum      => '202cb962ac59075b964b07152d234b70',
           checksum_time => 5,
+          modified_time => 5,
         },
       },
       exclusions => ['/testdir/test2.txt'],
@@ -894,6 +912,7 @@ sub test_check_file {
       $db_records{ $path } = {
         checksum      => $checksum,
         checksum_time => $test->{ db_records }{ $file }{ checksum_time },
+				modified_time => $test->{ db_records }{ $file }{ modified_time },
       };
     }
 
@@ -1114,59 +1133,42 @@ sub test_is_file_excluded {
 
 sub test_checksum_mismatch {
   my @tests = (
-    # The change is fine. The mtime is after the last time we computed the
-    # checksum.
     {
-      file_exists   => 1,
-      checksum_time => 5,
-      mtime         => 6,
-      output        => 0,
+			description      => 'The change is fine. The current mtime is after the last time we recorded the mtime',
+      db_modified_time => 6,
+			modified_time    => 7,
+      output           => 0,
     },
 
-    # The change is a problem. The mtime is prior to the last time we computed
-    # the checksum.
     {
-      file_exists   => 1,
-      checksum_time => 5,
-      mtime         => 4,
-      output        => 1,
+			description      => 'The change is a problem. The current mtime is prior to the last time we recorded the mtime.',
+      db_modified_time => 4,
+			modified_time    => 3,
+      output           => 1,
     },
 
-    # Unable to stat the file.
     {
-      file_exists => 0,
-      output      => -1,
+			description      => 'The change is a problem. The current mtime is the same as the last time we recorded the mtime.',
+      db_modified_time => 4,
+			modified_time    => 4,
+      output           => 1,
     },
   );
 
   my $failures = 0;
 
-  my $tmpfile = File::Temp::tmpnam();
-
   foreach my $test (@tests) {
-    if ($test->{ file_exists }) {
-      if (!&write_file($tmpfile, 'hi')) {
-        print "test_checksum_mismatch: Unable to write file: $tmpfile\n";
-        $failures++;
-        next;
-      }
+    my $db_record = {
+			# Arbitrary. It's used in the report.
+			checksum_time => 42,
+			modified_time => $test->{ db_modified_time },
+		};
 
-      if (utime($test->{ mtime }, $test->{ mtime }, $tmpfile) != 1) {
-        print "test_checksum_mismatch: utime failed: $tmpfile\n";
-        $failures++;
-        unlink $tmpfile;
-        next;
-      }
-    }
-
-    my $db_record = { checksum_time => $test->{ checksum_time } };
-
-    my $r = Checksummer::checksum_mismatch($tmpfile, $db_record);
-
-    unlink $tmpfile if $test->{ file_exists };
+    my $r = Checksummer::checksum_mismatch('testfile', $db_record,
+			$test->{ modified_time });
 
     if ($r != $test->{ output }) {
-      print "checksum_mismatch($tmpfile, ...) = $r, wanted $test->{ output }\n";
+      print "checksum_mismatch() = $r, wanted $test->{ output }\n";
       $failures++;
       next;
     }
@@ -1195,18 +1197,38 @@ sub test_database {
 }
 
 sub test_prune_database {
+	print "Starting prune_database() tests...\n";
+
   my @tests = (
     # Records present, but none to prune.
     {
       records_before => [
-        { file => '/dir/test.txt',  checksum => '123', checksum_time => 15, },
-        { file => '/dir/test2.txt', checksum => '123', checksum_time => 15, },
+        {
+					file          => '/dir/test.txt',
+					checksum      => '123',
+					checksum_time => 15,
+					modified_time => 10,
+				},
+        {
+					file          => '/dir/test2.txt',
+					checksum      => '123',
+					checksum_time => 15,
+					modified_time => 10,
+				},
       ],
       unixtime      => 10,
       pruned        => 0,
       records_after => {
-        '/dir/test.txt'  => { checksum => '123', checksum_time => 15, },
-        '/dir/test2.txt' => { checksum => '123', checksum_time => 15, },
+        '/dir/test.txt'  => {
+					checksum      => '123',
+					checksum_time => 15,
+					modified_time => 10,
+				},
+        '/dir/test2.txt' => {
+					checksum      => '123',
+					checksum_time => 15,
+					modified_time => 10,
+				},
       },
     },
 
@@ -1223,8 +1245,18 @@ sub test_prune_database {
     # Multiple records that all need pruning.
     {
       records_before => [
-        { file => '/dir/test.txt',  checksum => '123', checksum_time => 5, },
-        { file => '/dir/test2.txt', checksum => '123', checksum_time => 5, },
+        {
+					file          => '/dir/test.txt',
+					checksum      => '123',
+					checksum_time => 5,
+					modified_time => 1,
+				},
+        {
+					file          => '/dir/test2.txt',
+					checksum      => '123',
+					checksum_time => 5,
+					modified_time => 1,
+				},
       ],
       unixtime      => 10,
       pruned        => 2,
@@ -1232,7 +1264,7 @@ sub test_prune_database {
       },
     },
 
-    # Some records to prune, some to not.
+    # TODO: Some records to prune, some to not.
   );
 
   my $db_file = File::Temp::tmpnam();
@@ -1363,6 +1395,10 @@ sub test_util {
     $failures++;
   }
 
+	if (!&test_util_mtime) {
+		$failures++;
+	}
+
   return $failures == 0;
 }
 
@@ -1434,6 +1470,35 @@ sub test_util_calculate_checksum {
 
   print "$failures/" . (scalar(@tests)) . " test_util_calculate_checksum tests failed\n";
   return 0;
+}
+
+sub test_util_mtime {
+	my $tmpfile = File::Temp::tmpnam();
+
+	if (!write_file($tmpfile, 'hi')) {
+		return 0;
+	}
+
+	my $mtime = Checksummer::Util::mtime($tmpfile);
+	if (!defined $mtime) {
+		print "test_util_mtime: mtime is not defined\n";
+		unlink $tmpfile;
+		return 0;
+	}
+
+	my $now = time;
+	if ($mtime != $now && $mtime != $now-1) {
+		print "test_util_mtime: unexpected mtime of file\n";
+		unlink $tmpfile;
+		return 0;
+	}
+
+	if (!unlink $tmpfile) {
+		print "test_util_mtime: unlink failed: $tmpfile: $!\n";
+		return 0;
+	}
+
+	return 1;
 }
 
 sub write_file {

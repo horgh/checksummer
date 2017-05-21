@@ -10,6 +10,7 @@ use warnings;
 use Exporter qw/import/;
 use Digest::MD5 qw//;
 use Digest::SHA qw//;
+use File::stat qw//;
 
 our @EXPORT = qw/info error debug/;
 
@@ -68,6 +69,23 @@ sub calculate_checksum {
 	}
 
 	return $md5->digest;
+}
+
+# Get mtime
+sub mtime {
+	my ($path) = @_;
+	if (!defined $path || length $path == 0) {
+		error("mtime: Invalid parameter");
+		return undef;
+	}
+
+	my $st = File::stat::stat($path);
+	if (!$st) {
+		error("mtime: stat failure: $path: $!");
+		return undef;
+	}
+
+	return $st->mtime;
 }
 
 # Output a message at info level.

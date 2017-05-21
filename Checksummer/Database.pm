@@ -64,9 +64,10 @@ sub create_schema_if_needed {
 	# - checksum: Binary checksum of the file.
 	# - checksum_time: Unixtime when the checksum was calculated. We use this to
 	#   know that the file can be pruned from the database if it gets deleted.
-	#   TODO: This can be removed. I believe we can do pruning without it.
+	#   This can potentially be removed. I believe we can do pruning without it.
 	#   Previously I used it in the heuristics for deciding whether a checksum
-	#   change was problematic, but no longer.
+	#   change was problematic, but no longer. It may still be interesting to
+	#   track though.
 	# - modified_time: Unixtime of the file last time we calculated its checksum.
 	#   We use this for our heuristics around whether a checksum change is a
 	#   problem.
@@ -76,7 +77,7 @@ CREATE TABLE checksums (
   file NOT NULL,
   checksum NOT NULL,
   checksum_time INTEGER NOT NULL,
-  mtime INTEGER NOT NULL
+  modified_time INTEGER NOT NULL,
   UNIQUE(file)
 )
 /;
@@ -158,7 +159,7 @@ sub get_db_records {
 	$path_sql .= '/%';
 
 	my $sql = q/
-	SELECT file, checksum, checksum_time
+	SELECT file, checksum, checksum_time, modified_time
 	FROM checksums
 	WHERE file LIKE ? ESCAPE '\\'/;
 	my @params = ($path_sql);
@@ -175,6 +176,7 @@ sub get_db_records {
 		$checksums{ $row->[0] } = {
 			checksum      => $row->[1],
 			checksum_time => $row->[2],
+			modified_time => $row->[3],
 		},
 	}
 
@@ -208,17 +210,22 @@ sub update_db_records {
 
 	my $insert_sql = q/
 	INSERT INTO checksums
-	(file, checksum, checksum_time) VALUES(?, ?, ?)/;
+	(file, checksum, checksum_time, modified_time)
+	VALUES(?, ?, ?, ?)
+/;
+
 	my $update_sql = q/
 	UPDATE checksums
-	SET checksum = ?, checksum_time = ?
-	WHERE file = ?/;
+	SET checksum = ?, checksum_time = ?, modified_time = ?
+	WHERE file = ?
+/;
 
 	my $insert_sth = $dbh->prepare($insert_sql);
 	if (!$insert_sth) {
 		error("Failure preparing SQL: $insert_sql: " . $dbh->errstr);
 		return 0;
 	}
+
 	my $update_sth = $dbh->prepare($update_sql);
 	if (!$update_sth) {
 		error("Failure preparing SQL: $update_sql: " . $dbh->errstr);
@@ -232,9 +239,18 @@ sub update_db_records {
 	}
 
 	foreach my $c (@{ $new_records }) {
+		if (!exists $c->{ file } ||
+			!exists $c->{ checksum } ||
+			!exists $c->{ checksum_time } ||
+			!exists $c->{ modified_time }) {
+			error("Record is missing a field");
+			$dbh->rollback;
+			return 0;
+		}
+
 		if (exists $old_records->{ $c->{ file } }) {
 			my $update_res = $update_sth->execute($c->{ checksum },
-				$c->{ checksum_time }, $c->{ file });
+				$c->{ checksum_time }, $c->{ modified_time}, $c->{ file });
 			if (!defined $update_res) {
 				error("Unable to update database for file $c->{ file }: "
 					. $update_sth->errstr);
@@ -246,7 +262,7 @@ sub update_db_records {
 		}
 
 		my $insert_res = $insert_sth->execute($c->{ file }, $c->{ checksum },
-			$c->{ checksum_time });
+			$c->{ checksum_time }, $c->{ modified_time });
 		if (!defined $insert_res) {
 			error("Unable to insert into database for file $c->{ file }: " .
 				$insert_sth->errstr);

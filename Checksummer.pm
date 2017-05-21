@@ -11,7 +11,6 @@ use Checksummer::Database qw//;
 use Checksummer::Util qw/info error debug/;
 use DBI qw//;
 use Exporter qw/import/;
-use File::stat qw//;
 
 # Read config file to get paths we want to checksum
 #
@@ -199,9 +198,6 @@ sub run {
 # If the checksums do not match, analyze whether the mismatch looks valid. If
 # it doesn't, warn there is a problem.
 #
-# This function is mainly a wrapper around check_file(). It exists to be able
-# to log differently for the top level paths.
-#
 # Parameters:
 #
 # $paths, array reference. Array of strings which are paths to check.
@@ -271,6 +267,7 @@ sub check_files {
 }
 
 # Examine each file and compare its checksum as described by check_files().
+# Either examine an individual file or recursively descend and analyze a tree.
 #
 # Parameters:
 #
@@ -287,12 +284,21 @@ sub check_files {
 #
 # Returns: An array reference, or undef if there was a failure.
 #
-# The array may be empty. If it is not, it will contain one element, a hash
-# reference.
+# The array may be empty. This can happen if the file/path should be excluded
+# or is a symbolic link, among other reasons. Elements in the array are hash
+# references.
 #
-# The hash will have keys file (file, string, the path), checksum (its hash,
-# binary), checksum_time (unixtime prior to calculating the checksum) and ok
-# (boolean, true if there was no mismatch problem).
+# The hash will have keys:
+#
+# - file (file, string, the path)
+#
+# - checksum (its hash, binary)
+#
+# - checksum_time (unixtime prior to calculating the checksum)
+#
+# - modified_time (unixtime of the file now)
+#
+# - ok (boolean, true if there was no mismatch problem)
 sub check_file {
 	my ($path, $hash_method, $exclusions, $db_records) = @_;
 
@@ -350,46 +356,64 @@ sub check_file {
 		return [];
 	}
 
-	# At this point we are dealing with a regular file.
+	# At this point we are dealing with a regular file. Calculate its checksum and
+	# potentially raise a warning if there is a problematic mismatch.
+
+	# Gather the newest information about the file. We fill the fields in as we
+	# go.
+	my %info = (
+		file          => $path,
+		checksum      => undef,
+		checksum_time => undef,
+		modified_time => undef,
+		ok            => 1,
+	);
 
 	# Record the current time prior to calculating the checksum. We use this both
 	# for heuristics and for pruning the database of deleted files.
-	my $checksum_time = time;
+	$info{ checksum_time } = time;
 
-	my $checksum = Checksummer::Util::calculate_checksum($path, $hash_method);
-	if (!defined $checksum) {
+	# Get the file's current mtime. We use it for heuristics.
+	$info{ modified_time } = Checksummer::Util::mtime($path);
+	if (!defined $info{ modified_time }) {
+		# We reported an error already.
+		return undef;
+	}
+
+	$info{ checksum } = Checksummer::Util::calculate_checksum($path,
+		$hash_method);
+	if (!defined $info{ checksum }) {
 		error("Failure building checksum for $path");
 		return undef;
 	}
 
-	# No checksum in the database? Add it. This is the first time we've seen the
-	# file.
+	# Is the file not in the database? Add it. This is the first time we've seen
+	# the file.
 	if (!exists $db_records->{ $path }) {
 		debug('debug', "No checksum found in database for $path, adding");
-		return [{ file => $path, checksum => $checksum,
-				checksum_time => $checksum_time, ok => 1 }];
+		return [ \%info ];
 	}
 
-	# If checksum matches then there is nothing to do.
-	if ($checksum eq $db_records->{ $path }{ checksum }) {
-		return [{ file => $path, checksum => $checksum,
-				checksum_time => $checksum_time, ok => 1 }];
+	# If the checksums match then there is nothing to do.
+	if ($info{ checksum } eq $db_records->{ $path }{ checksum }) {
+		return [ \%info ];
 	}
 
-	my $mismatch_result = &checksum_mismatch($path, $db_records->{ $path });
+	# Decide whether this mismatch is a problem or not. Report if it is.
+	my $mismatch_result = &checksum_mismatch($path, $db_records->{ $path },
+		$info{ modified_time });
 	if ($mismatch_result == -1) {
-		error("Problem checking mismatch for $path");
+		error("Problem checking checksum mismatch status for $path");
 		return undef;
 	}
 
-	# The mismatch looks problematic.
-	if ($mismatch_result == 1) {
-		return [{ file => $path, checksum => $checksum,
-				checksum_time => $checksum_time, ok => 0 }];
+	if ($mismatch_result == 0) {
+		return [ \%info ];
 	}
 
-	return [{ file => $path, checksum => $checksum,
-			checksum_time => $checksum_time, ok => 1 }];
+	# The mismatch looks problematic.
+	$info{ ok } = 0;
+	return [ \%info ];
 }
 
 # Some paths/files are excluded by the config (prefixed with !).
@@ -420,44 +444,41 @@ sub is_file_excluded {
 # $file, string. The file's path
 #
 # $db_record, hash reference. Information from the database about the file.
-# This includes keys checksum (its last computed checksum) and checksum_time
-# (the last time the checksum was computed).
+# See get_db_records() for what is in it.
+#
+# $current_mtime, integer. The modified time (unixtime) of the file right now.
 #
 # Returns: Integer.
 #
 # The integer will be 0 if the mismatch looks fine. It will be 1 if there
 # appears to be a problem. It will be -1 if there was an error.
 sub checksum_mismatch {
-	my ($path, $db_record) = @_;
+	my ($path, $db_record, $current_mtime) = @_;
 
 	# Optimization: I am not checking parameters here any more.
 
 	debug('debug', "CHECKSUM MISMATCH: $path");
 
-	# Find the file's modified time.
+	# If the file's current modified time is after the last modified time we have
+	# recorded for it, then we say there was a legitimate modification.
 
-	my $st = File::stat::stat($path);
-	if (!$st) {
-		error("stat failure: $!");
-		return -1;
-	}
+	# If it's the same then there is potentially corruption.
 
-	my $mtime = $st->mtime;
+	# If it's before then it is probably okay too, but is strange.
 
-	# If the file's modified time is on or after the last time we calculated its
-	# checksum, then assume there was a legitimate modification.
-	#
-	# If the file's modified time is prior to the last time we computed its
-	# checksum, then one of two things may have happened. Either there is file
-	# corruption, or the file was modified and its modified time was set to a
-	# time in the past. The latter is not unheard of, so this is at best a
-	# heuristic.
-
-	if ($mtime >= $db_record->{ checksum_time }) {
+	if ($current_mtime > $db_record->{ modified_time }) {
 		return 0;
 	}
 
-	info("Problematic checksum mismatch detected. File: $path Modified time: " . scalar(localtime($mtime)) . " Last time checksum computed: " . scalar(localtime($db_record->{ checksum_time })));
+	my $report = sprintf(
+		"Suspicious checksum mismatch detected for %s. Current modified time: %s Previously recorded modified time: %s Last time checksum computed: %s\n",
+		$path,
+		scalar(localtime($current_mtime)),
+		scalar(localtime($db_record->{ modified_time })),
+		scalar(localtime($db_record->{ checksum_time }))
+	);
+
+	info($report);
 
 	return 1;
 }
