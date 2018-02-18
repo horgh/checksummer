@@ -204,6 +204,10 @@ sub update_db_records {
 		return 0;
 	}
 
+	if (@$new_records == 0) {
+		return 1;
+	}
+
 	my $insert_sql = q/
 	INSERT INTO checksums
 	(file, checksum, checksum_time, modified_time)
