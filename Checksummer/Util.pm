@@ -97,7 +97,7 @@ sub info {
 	if (!defined $msg) {
 		return;
 	}
-	&debug('info', $msg);
+	debug('info', $msg);
 	return;
 }
 
@@ -130,11 +130,11 @@ sub set_debug {
 sub debug {
 	my ($level, $msg) = @_;
 	if (!defined $level) {
-		&stderr("debug: No level specified.");
+		stderr("debug: No level specified.");
 		return;
 	}
 	if (!defined $msg) {
-		&stderr("debug: No message given.");
+		stderr("debug: No message given.");
 		return;
 	}
 
@@ -156,9 +156,9 @@ sub debug {
 	}
 
 	if ($level eq 'error') {
-		&stderr($output);
+		stderr($output);
 	} else {
-		&stdout($output);
+		stdout($output);
 	}
 	return;
 }

@@ -24,7 +24,7 @@ $| = 1;
 #
 # Returns: Boolean, whether we completed successfully.
 sub main {
-	my $args = &_get_args;
+	my $args = _get_args();
 	if (!$args) {
 		return 0;
 	}
@@ -69,14 +69,14 @@ sub _get_args {
 	}
 
 	if (exists $args{ h }) {
-		&_print_usage;
+		_print_usage();
 		return undef;
 	}
 
 	if (!exists $args{ d } ||
 		length $args{ d } == 0) {
 		error("You must provide a database file.");
-		&_print_usage;
+		_print_usage();
 		return undef;
 	}
 	my $db_file = $args{ d };
@@ -84,21 +84,21 @@ sub _get_args {
 	if (!exists $args{ c } ||
 		length $args{ c } == 0) {
 		error("You must provide a config file.");
-		&_print_usage;
+		_print_usage();
 		return undef;
 	}
 	my $config = $args{ c };
 
 	if (!exists $args{ m } || length $args{ m } == 0) {
 		error("Please choose a hash method.");
-		&_print_usage;
+		_print_usage();
 		return undef;
 	}
 	my $hash_method = $args{ m };
 
 	if ($hash_method ne 'sha256' && $hash_method ne 'md5') {
 		error("Please select 'sha256' or 'md5' hash method.");
-		&_print_usage;
+		_print_usage();
 		return undef;
 	}
 
@@ -141,4 +141,4 @@ sub _print_usage {
 ";
 }
 
-exit(&main ? 0 : 1);
+exit(main() ? 0 : 1);

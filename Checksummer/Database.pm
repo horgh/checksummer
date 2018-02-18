@@ -21,7 +21,7 @@ sub open_db {
 		return undef;
 	}
 
-	if (!&create_schema_if_needed($dbh)) {
+	if (!create_schema_if_needed($dbh)) {
 		error("Failed to create database schema.");
 		return undef;
 	}
@@ -51,7 +51,7 @@ sub create_schema_if_needed {
 
 	my $table_name = 'checksums';
 
-	if (&table_exists($dbh, $table_name)) {
+	if (table_exists($dbh, $table_name)) {
 		return 1;
 	}
 
@@ -80,7 +80,7 @@ CREATE TABLE checksums (
 )
 /;
 
-	my $r = &db_manipulate($dbh, $table_sql, []);
+	my $r = db_manipulate($dbh, $table_sql, []);
 	if (!defined $r) {
 		error("Unable to create table $table_name");
 		return 0;
@@ -89,7 +89,7 @@ CREATE TABLE checksums (
 	# We query subsets of rows based on the file path.
 	my $index_sql = q/CREATE INDEX file_idx ON checksums (file)/;
 
-	$r = &db_manipulate($dbh, $index_sql, []);
+	$r = db_manipulate($dbh, $index_sql, []);
 	if (!defined $r) {
 		error("Unable to create index on table $table_name");
 		return 0;
@@ -117,7 +117,7 @@ sub table_exists {
 	my $sql = q/SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?/;
 	my @params = ($table);
 
-	my $rows = &db_select($dbh, $sql, \@params);
+	my $rows = db_select($dbh, $sql, \@params);
 	if (!$rows) {
 		error("Failure selecting table from db");
 		return 0;
@@ -151,7 +151,7 @@ sub get_db_records {
 	# Let path be empty. This retrieves all.
 	$path = '' if !defined $path;
 
-	my $path_sql = &escape_like_parameter($path);
+	my $path_sql = escape_like_parameter($path);
 	$path_sql .= '/%';
 
 	my $sql = q/
@@ -160,7 +160,7 @@ sub get_db_records {
 	WHERE file LIKE ? ESCAPE '\\'/;
 	my @params = ($path_sql);
 
-	my $rows = &db_select($dbh, $sql, \@params);
+	my $rows = db_select($dbh, $sql, \@params);
 	if (!$rows) {
 		error("Select failure");
 		return undef;

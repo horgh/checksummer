@@ -86,7 +86,7 @@ sub read_config {
 		exclusions => \@exclusions,
 	);
 
-	if (!&is_valid_config(\%config)) {
+	if (!is_valid_config(\%config)) {
 		error("Configuration problem");
 		return undef;
 	}
@@ -241,7 +241,7 @@ sub check_files {
 			return undef;
 		}
 
-		my $path_checksums = &check_file($path, $hash_method, $exclusions,
+		my $path_checksums = check_file($path, $hash_method, $exclusions,
 			$db_records);
 		if (!$path_checksums) {
 			error("Problem checking path: $path");
@@ -302,7 +302,7 @@ sub check_file {
 
 	# Optimization: I am not checking parameters here any more.
 
-	if (&is_file_excluded($exclusions, $path)) {
+	if (is_file_excluded($exclusions, $path)) {
 		return [];
 	}
 
@@ -331,7 +331,7 @@ sub check_file {
 
 			my $full_path = $path . '/' . $file;
 
-			my $file_checksums = &check_file($full_path, $hash_method, $exclusions,
+			my $file_checksums = check_file($full_path, $hash_method, $exclusions,
 				$db_records);
 			if (!$file_checksums) {
 				error("Unable to checksum: $full_path");
@@ -398,7 +398,7 @@ sub check_file {
 	}
 
 	# Decide whether this mismatch is a problem or not. Report if it is.
-	my $mismatch_result = &checksum_mismatch($path, $db_records->{ $path },
+	my $mismatch_result = checksum_mismatch($path, $db_records->{ $path },
 		$info{ modified_time });
 	if ($mismatch_result == -1) {
 		error("Problem checking checksum mismatch status for $path");
