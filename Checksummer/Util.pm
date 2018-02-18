@@ -1,6 +1,4 @@
-#
 # Generic utility functions.
-#
 
 package Checksummer::Util;
 
@@ -71,7 +69,6 @@ sub calculate_checksum {
 	return $md5->digest;
 }
 
-# Get mtime
 sub mtime {
 	my ($path) = @_;
 	if (!defined $path || length $path == 0) {

@@ -1,6 +1,4 @@
-#
 # Functions for interaction with the database.
-#
 
 use strict;
 use warnings;
@@ -127,8 +125,6 @@ sub table_exists {
 
 	return 1 if @{ $rows } > 0;
 	return 0;
-
-	# Create the table
 }
 
 # Load all current records about files from the database.

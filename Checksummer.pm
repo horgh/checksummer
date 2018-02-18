@@ -1,6 +1,4 @@
-#
 # Core checksummer functions.
-#
 
 use strict;
 use warnings;
