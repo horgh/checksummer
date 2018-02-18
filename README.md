@@ -20,8 +20,8 @@ computed checksum with the one found in a database for the file. This
 reveals whether the file changed since the last run.
 
 If the file changed, checksummer uses the file's modification time to
-decide whether the modification is legitimate. Each time it inspects a
-file, it also records the file's last modification time.
+decide whether the modification is legitimate. (Each time it inspects a
+file, it also records the file's last modification time.)
 
 Using these two modification times, checksummer decides whether the
 modification is legitimate or suspicious. If the new modification time is
@@ -32,18 +32,18 @@ suspicious.
 
 
 # Dependencies
-  * Perl 5
-  * [DBI](http://dbi.perl.org/)
-  * DBD::SQLite (`libdbd-sqlite3-perl` in Debian)
-  * SQLite 3
+* Perl 5
+* [DBI](http://dbi.perl.org/)
+* DBD::SQLite (`libdbd-sqlite3-perl` in Debian)
+* SQLite 3
 
 
 # Usage/setup
-  * Copy `checksummer.conf.sample` and edit it. Enter any paths you want to
-    monitor. checksummer recursively descends all directories you specify.
-  * Run the program. For example:
+* Copy `checksummer.conf.sample` and edit it. Enter any paths you want to
+  monitor. checksummer recursively descends all directories you specify.
+* Run the program. For example:
 
         perl checksummer.pl -d checksummer.db -c checksummer.conf -m md5
 
-  * It creates the database automatically if it does not exist.
-  * Run it periodically, such as from cron, to monitor files.
+* It creates the database automatically if it does not exist.
+* Run it periodically, such as from cron, to monitor files.

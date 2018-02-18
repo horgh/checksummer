@@ -1,16 +1,3 @@
-# This program is for checking for file corruption.
-#
-# It works by gathering checksums for all files in configured paths. It
-# compares the checksum for each file with the checksum stored in a database.
-# If it is different, and if the program determines this is erroneous, it
-# reports it.
-#
-# Its main heuristic is to check if a file's modified time indicates the file
-# should not have changed. This is not guaranteed to be correct.
-#
-# A better solution would be to use a filesystem like ZFS. However, this
-# program can help if that is not an option.
-
 use strict;
 use warnings;
 
