@@ -15,17 +15,17 @@ sub main {
 
 	my $failures = 0;
 
-	if (!&test_checksummer) {
+	if (!test_checksummer()) {
 		print "Checksummer tests failed\n";
 		$failures++;
 	}
 
-	if (!&test_database) {
+	if (!test_database()) {
 		print "Database tests failed\n";
 		$failures++;
 	}
 
-	if (!&test_util) {
+	if (!test_util()) {
 		print "Util tests failed\n";
 		$failures++;
 	}
@@ -43,23 +43,23 @@ sub main {
 sub test_checksummer {
 	my $failures = 0;
 
-	if (!&test_read_config) {
+	if (!test_read_config()) {
 		$failures++;
 	}
 
-	if (!&test_run) {
+	if (!test_run()) {
 		$failures++;
 	}
 
-	if (!&test_check_file) {
+	if (!test_check_file()) {
 		$failures++;
 	}
 
-	if (!&test_is_file_excluded) {
+	if (!test_is_file_excluded()) {
 		$failures++;
 	}
 
-	if (!&test_checksum_mismatch) {
+	if (!test_checksum_mismatch()) {
 		$failures++;
 	}
 
@@ -159,7 +159,7 @@ sub test_read_config {
 	my $failures = 0;
 
 	TEST: foreach my $test (@tests) {
-		if (!&write_file($tmpfile, $test->{ config })) {
+		if (!write_file($tmpfile, $test->{ config })) {
 			print "test_read_config: Unable to write file: $tmpfile\n";
 			$failures++;
 			next;
@@ -415,7 +415,7 @@ sub test_run {
 		}
 
 		# Create files to check.
-		if (!&populate_directory($working_dir, $test->{ files })) {
+		if (!populate_directory($working_dir, $test->{ files })) {
 			print "test_run: Unable to create files to test with\n";
 			$failures++;
 			unlink $db_file;
@@ -457,7 +457,7 @@ sub test_run {
 			next;
 		}
 
-		if (!&checksums_are_equal($working_dir, $test->{ returned_checksums },
+		if (!checksums_are_equal($working_dir, $test->{ returned_checksums },
 				$returned_checksums)) {
 			print "test_run: returned checksums are not what we want\n";
 			$failures++;
@@ -896,7 +896,7 @@ sub test_check_file {
 	foreach my $test (@tests) {
 		print "test_check_file: Running test $test->{ desc }...\n";
 
-		if (!&populate_directory($working_dir, $test->{ files })) {
+		if (!populate_directory($working_dir, $test->{ files })) {
 			print "test_check_file: Unable to create test files\n";
 			$failures++;
 			next;
@@ -948,7 +948,7 @@ sub test_check_file {
 			next;
 		}
 
-		if (!&checksums_are_equal($working_dir, $test->{ output }, $r)) {
+		if (!checksums_are_equal($working_dir, $test->{ output }, $r)) {
 			print "test_check_file: returned checksums are not as expected\n";
 			$failures++;
 			next;
@@ -1026,7 +1026,7 @@ sub populate_directory {
 			$content = $file->{ content };
 		}
 
-		if (!&write_file($path, $content)) {
+		if (!write_file($path, $content)) {
 			print "populate_directory: Unable to write file: $path\n";
 			File::Path::remove_tree($working_dir);
 			return 0;
@@ -1185,11 +1185,11 @@ sub test_checksum_mismatch {
 sub test_database {
 	my $failures = 0;
 
-	if (!&test_escape_like_parameter) {
+	if (!test_escape_like_parameter()) {
 		$failures++;
 	}
 
-	if (!&test_prune_database) {
+	if (!test_prune_database()) {
 		$failures++;
 	}
 
@@ -1391,11 +1391,11 @@ sub test_escape_like_parameter {
 sub test_util {
 	my $failures = 0;
 
-	if (!&test_util_calculate_checksum) {
+	if (!test_util_calculate_checksum()) {
 		$failures++;
 	}
 
-	if (!&test_util_mtime) {
+	if (!test_util_mtime()) {
 		$failures++;
 	}
 
@@ -1424,7 +1424,7 @@ sub test_util_calculate_checksum {
 			next;
 		}
 
-		if (!&write_file($tmpfile, $test->{ input })) {
+		if (!write_file($tmpfile, $test->{ input })) {
 			print "test_util_calculate_checksum: Unable to write file\n";
 			$failures++;
 			next;
@@ -1529,4 +1529,4 @@ sub write_file {
 	return 1;
 }
 
-exit(&main ? 0 : 1);
+exit(main() ? 0 : 1);
