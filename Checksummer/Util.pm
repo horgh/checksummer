@@ -98,6 +98,7 @@ sub info {
 		return;
 	}
 	&debug('info', $msg);
+	return;
 }
 
 # Output a message at error level.
@@ -110,11 +111,13 @@ sub info {
 sub error {
 	my ($msg) = @_;
 	debug('error', $msg);
+	return;
 }
 
 sub set_debug {
 	my ($v) = @_;
 	$DEBUG = $v;
+	return;
 }
 
 # Parameters:
@@ -157,6 +160,7 @@ sub debug {
 	} else {
 		&stdout($output);
 	}
+	return;
 }
 
 # Parameters:
@@ -173,6 +177,7 @@ sub stdout {
 
 	chomp $msg;
 	print { \*STDOUT } "$msg\n";
+	return;
 }
 
 # Parameters:
@@ -189,6 +194,7 @@ sub stderr {
 
 	chomp $msg;
 	print { \*STDERR } "$msg\n";
+	return;
 }
 
 1;
