@@ -69,6 +69,8 @@ sub create_schema_if_needed {
 	# - modified_time: Unixtime of the file last time we calculated its checksum.
 	#   We use this for our heuristics around whether a checksum change is a
 	#   problem.
+	# - ok: Whether the last time the file was checked we thought there was a
+	#   problem.
 	my $table_sql = q/
 CREATE TABLE checksums (
   id INTEGER PRIMARY KEY,
@@ -76,6 +78,7 @@ CREATE TABLE checksums (
   checksum NOT NULL,
   checksum_time INTEGER NOT NULL,
   modified_time INTEGER NOT NULL,
+  ok BOOLEAN NOT NULL,
   UNIQUE(file)
 )
 /;
@@ -157,7 +160,8 @@ sub get_db_records {
 	my $sql = q/
 	SELECT file, checksum, checksum_time, modified_time
 	FROM checksums
-	WHERE file LIKE ? ESCAPE '\\'/;
+	WHERE file LIKE ? ESCAPE '\\'
+	/;
 	my @params = ($path_sql);
 
 	my $rows = db_select($dbh, $sql, \@params);
@@ -173,7 +177,7 @@ sub get_db_records {
 			checksum      => $row->[1],
 			checksum_time => $row->[2],
 			modified_time => $row->[3],
-		},
+		};
 	}
 
 	return \%checksums;
@@ -210,13 +214,13 @@ sub update_db_records {
 
 	my $insert_sql = q/
 	INSERT INTO checksums
-	(file, checksum, checksum_time, modified_time)
-	VALUES(?, ?, ?, ?)
+	(file, checksum, checksum_time, modified_time, ok)
+	VALUES(?, ?, ?, ?, ?)
 /;
 
 	my $update_sql = q/
 	UPDATE checksums
-	SET checksum = ?, checksum_time = ?, modified_time = ?
+	SET checksum = ?, checksum_time = ?, modified_time = ?, ok = ?
 	WHERE file = ?
 /;
 
@@ -242,7 +246,8 @@ sub update_db_records {
 		if (!exists $c->{ file } ||
 			!exists $c->{ checksum } ||
 			!exists $c->{ checksum_time } ||
-			!exists $c->{ modified_time }) {
+			!exists $c->{ modified_time } ||
+			!exists $c->{ok}) {
 			error("Record is missing a field");
 			$dbh->rollback;
 			return 0;
@@ -250,7 +255,7 @@ sub update_db_records {
 
 		if (exists $old_records->{ $c->{ file } }) {
 			my $update_res = $update_sth->execute($c->{ checksum },
-				$c->{ checksum_time }, $c->{ modified_time}, $c->{ file });
+				$c->{ checksum_time }, $c->{ modified_time}, $c->{ ok }, $c->{ file });
 			if (!defined $update_res) {
 				error("Unable to update database for file $c->{ file }: "
 					. $update_sth->errstr);
@@ -262,7 +267,7 @@ sub update_db_records {
 		}
 
 		my $insert_res = $insert_sth->execute($c->{ file }, $c->{ checksum },
-			$c->{ checksum_time }, $c->{ modified_time });
+			$c->{ checksum_time }, $c->{ modified_time }, $c->{ ok });
 		if (!defined $insert_res) {
 			error("Unable to insert into database for file $c->{ file }: " .
 				$insert_sth->errstr);

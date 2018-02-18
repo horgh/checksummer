@@ -253,12 +253,14 @@ sub test_run {
 					checksum      => $binary_md5sum_of_123,
 					checksum_time => 5,
 					modified_time => 4,
+					ok            => 1,
 				},
 				{
 					file          => '/dir2/test.txt',
 					checksum      => $binary_md5sum_of_123,
 					checksum_time => 5,
 					modified_time => 4,
+					ok            => 1,
 				},
 			],
 			files => [
@@ -267,9 +269,10 @@ sub test_run {
 				{ path => '/dir2',          exists => 1, dir     => 1 },
 				{ path => '/dir2/test.txt', exists => 1, content => '123' },
 			],
-			returned_checksums => [
-				{ file => '/dir1/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
-				{ file => '/dir2/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
+			# Currently a subset of columns.
+			db_records_after => [
+				{ file => '/dir1/test.txt', checksum => $binary_md5sum_of_123, ok => 1 },
+				{ file => '/dir2/test.txt', checksum => $binary_md5sum_of_123, ok => 1 },
 			],
 			want_error => 0,
 		},
@@ -289,9 +292,10 @@ sub test_run {
 				{ path => '/dir2',          exists => 1, dir     => 1 },
 				{ path => '/dir2/test.txt', exists => 1, content => '123' },
 			],
-			returned_checksums => [
-				{ file => '/dir1/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
-				{ file => '/dir2/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
+			# Currently a subset of columns.
+			db_records_after => [
+				{ file => '/dir1/test.txt', checksum => $binary_md5sum_of_123, ok => 1 },
+				{ file => '/dir2/test.txt', checksum => $binary_md5sum_of_123, ok => 1 },
 			],
 			want_error => 0,
 		},
@@ -310,12 +314,14 @@ sub test_run {
 					checksum      => $binary_md5sum_of_123,
 					checksum_time => 5,
 					modified_time => 4,
+					ok            => 1,
 				},
 				{
 					file          => '/dir2/test.txt',
 					checksum      => 1,
 					checksum_time => 5,
 					modified_time => 4,
+					ok            => 1,
 				},
 			],
 			files => [
@@ -325,9 +331,10 @@ sub test_run {
 				{ path => '/dir2/test.txt', exists => 1, content => '123',
 					mtime => 6, },
 			],
-			returned_checksums => [
-				{ file => '/dir1/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
-				{ file => '/dir2/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
+			# Currently a subset of columns.
+			db_records_after => [
+				{ file => '/dir1/test.txt', checksum => $binary_md5sum_of_123, ok => 1 },
+				{ file => '/dir2/test.txt', checksum => $binary_md5sum_of_123, ok => 1 },
 			],
 			want_error => 0,
 		},
@@ -346,12 +353,14 @@ sub test_run {
 					checksum      => $binary_md5sum_of_123,
 					checksum_time => 5,
 					modified_time => 4,
+					ok            => 1,
 				},
 				{
 					file          => '/dir2/test.txt',
 					checksum      => 1,
 					checksum_time => 5,
 					modified_time => 4,
+					ok            => 1,
 				},
 			],
 			files => [
@@ -361,9 +370,10 @@ sub test_run {
 				{ path => '/dir2/test.txt', exists => 1, content => '123',
 					mtime => 4 },
 			],
-			returned_checksums => [
-				{ file => '/dir1/test.txt', checksum => $hex_md5sum_of_123, ok => 1 },
-				{ file => '/dir2/test.txt', checksum => $hex_md5sum_of_123, ok => 0 },
+			# Currently a subset of columns.
+			db_records_after => [
+				{ file => '/dir1/test.txt', checksum => $binary_md5sum_of_123, ok => 1 },
+				{ file => '/dir2/test.txt', checksum => $binary_md5sum_of_123, ok => 0 },
 			],
 			want_error => 0,
 		},
@@ -375,7 +385,7 @@ sub test_run {
 
 	my $failures = 0;
 
-	foreach my $test (@tests) {
+	TEST: foreach my $test (@tests) {
 		print "test_run: Running test $test->{ desc }\n";
 
 		# Populate the database with the initial state we specify.
@@ -435,34 +445,82 @@ sub test_run {
 		}
 
 		# Check.
-		my $returned_checksums = Checksummer::run($db_file, $hash_method,
-			1, $test->{ config }, 1);
+		my $success = Checksummer::run($db_file, $hash_method, 1, $test->{ config },
+			1);
 
-		File::Path::remove_tree($working_dir);
-		unlink $db_file;
 
 		if ($test->{ want_error }) {
-			if (defined $returned_checksums) {
+			if ($success) {
 				print "test_run: wanted failure, but succeeded\n";
 				$failures++;
+				File::Path::remove_tree($working_dir);
+				unlink $db_file;
 				next;
 			}
 
+			File::Path::remove_tree($working_dir);
+			unlink $db_file;
 			next;
 		}
 
-		if (!defined $returned_checksums) {
+		if (!$success) {
 			print "test_run: wanted success, but failed\n";
 			$failures++;
+			File::Path::remove_tree($working_dir);
+			unlink $db_file;
 			next;
 		}
 
-		if (!checksums_are_equal($working_dir, $test->{ returned_checksums },
-				$returned_checksums)) {
-			print "test_run: returned checksums are not what we want\n";
+		my $dbh2 = Checksummer::Database::open_db($db_file);
+		if (!$dbh2) {
+			print "test_run: unable to open database\n";
 			$failures++;
+			File::Path::remove_tree($working_dir);
+			unlink $db_file;
 			next;
 		}
+
+		my $db_records_after = get_all_db_records($dbh2);
+		$dbh2->disconnect;
+		if (!$db_records_after) {
+			print "test_run: error retrieving records\n";
+			$failures++;
+			File::Path::remove_tree($working_dir);
+			unlink $db_file;
+			next;
+		}
+
+		if (scalar @$db_records_after != @{ $test->{db_records_after} }) {
+			print "test_run: test: $test->{desc}: got " . scalar(@$db_records_after) .
+				" records, wanted " . scalar(@{ $test->{db_records_after} }) .
+				" records\n";
+			$failures++;
+			File::Path::remove_tree($working_dir);
+			unlink $db_file;
+			next;
+		}
+
+		for (my $i = 0; $i < @{ $test->{db_records_after} }; $i++) {
+			my $wanted = $test->{db_records_after}[$i];
+			my $got = $db_records_after->[$i];
+			foreach my $key (keys %$wanted) {
+				my $wanted_value = $wanted->{$key};
+				if ($key eq 'file') {
+					$wanted_value = $working_dir . $wanted_value;
+				}
+				if ($got->{$key} ne $wanted_value) {
+					print "test_run: test: $test->{desc}: got $key = " . $got->{$key} .
+						", wanted " . $wanted_value . "\n";
+					$failures++;
+					File::Path::remove_tree($working_dir);
+					unlink $db_file;
+					next TEST;
+				}
+			}
+		}
+
+		File::Path::remove_tree($working_dir);
+		unlink $db_file;
 	}
 
 	if ($failures == 0) {
@@ -1208,12 +1266,14 @@ sub test_prune_database {
 					checksum      => '123',
 					checksum_time => 15,
 					modified_time => 10,
+					ok            => 1,
 				},
 				{
 					file          => '/dir/test2.txt',
 					checksum      => '123',
 					checksum_time => 15,
 					modified_time => 10,
+					ok            => 1,
 				},
 			],
 			unixtime      => 10,
@@ -1250,12 +1310,14 @@ sub test_prune_database {
 					checksum      => '123',
 					checksum_time => 5,
 					modified_time => 1,
+					ok            => 1,
 				},
 				{
 					file          => '/dir/test2.txt',
 					checksum      => '123',
 					checksum_time => 5,
 					modified_time => 1,
+					ok            => 1,
 				},
 			],
 			unixtime      => 10,
@@ -1527,6 +1589,43 @@ sub write_file {
 	}
 
 	return 1;
+}
+
+sub get_all_db_records {
+	my ($dbh) = @_;
+	if (!$dbh) {
+		print "get_all_db_records: You must provide a database handle\n";
+		return undef;
+	}
+
+	my $sql = q/
+	SELECT
+	id, file, checksum, checksum_time, modified_time, ok
+	FROM checksums
+	ORDER BY file
+	/;
+	my @params;
+
+	my $rows = Checksummer::Database::db_select($dbh, $sql, \@params);
+	if (!$rows) {
+		print "get_all_db_records: Select failure\n";
+		return undef;
+	}
+
+	my @records;
+
+	foreach my $row (@{ $rows }) {
+		push @records, {
+			id            => $row->[0],
+			file          => $row->[1],
+			checksum      => $row->[2],
+			checksum_time => $row->[3],
+			modified_time => $row->[4],
+			ok            => $row->[5],
+		};
+	}
+
+	return \@records;
 }
 
 exit(main() ? 0 : 1);

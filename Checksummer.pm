@@ -144,43 +144,40 @@ sub is_valid_config {
 # Run checks using checksums from a database. We create the database if
 # necessary, and update it with any changed or new checksums.
 #
-# Returns: An array reference containing the files that changed if
-# $should_return_checksums is 1, else an empty array reference, or undef if
-# failure. See check_files() for an explanation of the return value.
+# Return boolean whether we succeed.
 sub run {
-	my ($db_file, $hash_method, $prune, $config, $should_return_checksums) = @_;
+	my ($db_file, $hash_method, $prune, $config) = @_;
 	if (!defined $db_file || length $db_file == 0 ||
 		!defined $hash_method || length $hash_method == 0 ||
 		!defined $prune || !$config) {
 		error("Invalid parameter");
-		return undef;
+		return 0;
 	}
 
 	my $dbh = Checksummer::Database::open_db($db_file);
 	if (!$dbh) {
 		error("Cannot open database");
-		return undef;
+		return 0;
 	}
 
 	my $start_time = time;
 
-	my $new_checksums = Checksummer::check_files($dbh, $config->{ paths },
-		$hash_method, $config->{ exclusions }, $should_return_checksums);
-	if (!$new_checksums) {
+	if (!check_files($dbh, $config->{ paths }, $hash_method,
+			$config->{ exclusions })) {
 		error('Failure performing file checks.');
-		return undef;
+		return 0;
 	}
 
 	if ($prune) {
 		my $pruned_count = Checksummer::Database::prune_database($dbh, $start_time);
 		if ($pruned_count == -1) {
 			error("Unable to prune database of deleted files.");
-			return undef;
+			return 0;
 		}
 		info("Pruned $pruned_count database records.");
 	}
 
-	return $new_checksums;
+	return 1;
 }
 
 # Check all files.
@@ -206,29 +203,14 @@ sub run {
 #
 # $exclusions, array reference. Array of strings. These are paths to not check.
 #
-# $should_return_checksums, boolean. Whether to return information about files
-# or not. As doing so necessarily requires using memory, you may not wish to do
-# this.
-#
-# Returns: An array reference, or undef if failure.
-#
-# If you ask to return checksums, then the array is filled with hash
-# references. Each hash reference provides the file and current checksum for
-# the file. All files under the given path will be present, no matter whether
-# the file's checksum changed or not. For information about the format of the
-# hash, see check_file().
-#
-# If you don't ask to return checksums, the array reference will be empty.
+# Return boolean whether we succeed.
 sub check_files {
-	my ($dbh, $paths, $hash_method, $exclusions,
-		$should_return_checksums) = @_;
+	my ($dbh, $paths, $hash_method, $exclusions) = @_;
 	if (!$dbh || !$paths || @$paths == 0 || !defined $hash_method ||
 		length $hash_method == 0 || !$exclusions) {
 		error("Invalid parameter");
-		return undef;
+		return 0;
 	}
-
-	my @new_checksums;
 
 	foreach my $path (@{ $paths }) {
 		info("Checking [$path]...");
@@ -240,30 +222,24 @@ sub check_files {
 		my $db_records = Checksummer::Database::get_db_records($dbh, $path);
 		if (!$db_records) {
 			error("Unable to load file information from the database.");
-			return undef;
+			return 0;
 		}
 
 		my $path_checksums = check_file($path, $hash_method, $exclusions,
 			$db_records);
 		if (!$path_checksums) {
 			error("Problem checking path: $path");
-			return undef;
+			return 0;
 		}
 
 		if (!Checksummer::Database::update_db_records($dbh, $db_records,
 				$path_checksums)) {
 			error("Unable to perform database updates.");
-			return undef;
-		}
-
-		# Conditionally return the checksums. This is useful for testing, but in
-		# real runs this can lead to high memory consumption.
-		if ($should_return_checksums) {
-			push @new_checksums, @{ $path_checksums };
+			return 0;
 		}
 	}
 
-	return \@new_checksums;
+	return 1;
 }
 
 # Examine each file and compare its checksum as described by check_files().
