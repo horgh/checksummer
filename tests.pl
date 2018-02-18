@@ -986,8 +986,10 @@ sub test_check_file {
 		# said with the working directory.
 		my $start_file = $working_dir . $test->{ file };
 
-		my $r = Checksummer::check_file($start_file, $hash_method, \@exclusions,
-			\%db_records);
+		# TODO(horgh): Test using $dbh in check_file().
+		my $dbh;
+		my $r = Checksummer::check_file($dbh, $start_file, $hash_method,
+			\@exclusions, \%db_records);
 		File::Path::remove_tree($working_dir);
 
 		if ($test->{ want_error }) {

@@ -225,7 +225,7 @@ sub check_files {
 			return 0;
 		}
 
-		my $path_checksums = check_file($path, $hash_method, $exclusions,
+		my $path_checksums = check_file($dbh, $path, $hash_method, $exclusions,
 			$db_records);
 		if (!$path_checksums) {
 			error("Problem checking path: $path");
@@ -276,7 +276,7 @@ sub check_files {
 #
 # - ok (boolean, true if there was no mismatch problem)
 sub check_file {
-	my ($path, $hash_method, $exclusions, $db_records) = @_;
+	my ($dbh, $path, $hash_method, $exclusions, $db_records) = @_;
 
 	# Optimization: I am not checking parameters here any more.
 
@@ -309,8 +309,8 @@ sub check_file {
 
 			my $full_path = $path . '/' . $file;
 
-			my $file_checksums = check_file($full_path, $hash_method, $exclusions,
-				$db_records);
+			my $file_checksums = check_file($dbh, $full_path, $hash_method,
+				$exclusions, $db_records);
 			if (!$file_checksums) {
 				error("Unable to checksum: $full_path");
 				closedir $dh;
@@ -318,6 +318,18 @@ sub check_file {
 			}
 
 			push @dir_checksums, @{ $file_checksums };
+
+			# Batch database updates. Doing smaller batches here rather than only in
+			# check_files() allows lower memory use.
+			if (@dir_checksums >= 1000) {
+				if (!Checksummer::Database::update_db_records($dbh, $db_records,
+						\@dir_checksums)) {
+					error("Error updating the database");
+					closedir $dh;
+					return undef;
+				}
+				@dir_checksums = ();
+			}
 		}
 
 		if (!closedir $dh) {
