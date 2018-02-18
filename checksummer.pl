@@ -16,6 +16,7 @@ use warnings;
 
 use Checksummer qw//;
 use Checksummer::Util qw/info error/;
+use Fcntl qw( :flock );
 use Getopt::Std qw//;
 
 $| = 1;
@@ -31,9 +32,22 @@ sub main {
 
 	Checksummer::Util::set_debug($args->{ debug });
 
+	# Get an exclusive lock so that we're sure only one instance runs.
+	my $fh;
+	my $lockfile = '/var/run/lock/checksummer.lock';
+	if (!open $fh, '>>', $lockfile) {
+		error("Error opening lock file: $lockfile: $!");
+		return 0;
+	}
+	if (!flock($fh, LOCK_EX|LOCK_NB)) {
+		error("Error acquiring lock on $lockfile: $!");
+		return 0;
+	}
+
 	my $config = Checksummer::read_config($args->{ config });
 	if (!$config) {
 		error('Failure reading config.');
+		close($fh);
 		return 0;
 	}
 
@@ -43,6 +57,7 @@ sub main {
 		$args->{ hash_method }, $config);
 	if (!$new_checksums) {
 		error("Failure running checks.");
+		close($fh);
 		return 0;
 	}
 
@@ -58,6 +73,7 @@ sub main {
 	$runtime_in_seconds = $runtime_in_seconds%60;
 
 	info("Finished. Runtime: ${runtime_in_hours}h${runtime_in_minutes}m${runtime_in_seconds}s.");
+	close($fh);
 	return 1;
 }
 
