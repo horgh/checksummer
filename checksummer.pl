@@ -41,7 +41,7 @@ sub main {
 	my $start = time;
 
 	my $new_checksums = Checksummer::run($args->{ db_file },
-		$args->{ hash_method }, $config);
+		$args->{ hash_method }, $args->{ prune }, $config);
 	if (!$new_checksums) {
 		error("Failure running checks.");
 		close($fh);
@@ -66,7 +66,7 @@ sub main {
 
 sub _get_args {
 	my %args;
-	if (!Getopt::Std::getopts('hd:c:m:v', \%args)) {
+	if (!Getopt::Std::getopts('hd:c:m:vp', \%args)) {
 		error("Invalid option.");
 		return undef;
 	}
@@ -110,11 +110,17 @@ sub _get_args {
 		$debug = 1;
 	}
 
+	my $prune = 0;
+	if (exists $args{ p }) {
+		$prune = 1;
+	}
+
 	return {
 		db_file     => $db_file,
 		config      => $config,
 		hash_method => $hash_method,
 		debug	      => $debug,
+		prune       => $prune,
 	};
 }
 

@@ -144,13 +144,14 @@ sub is_valid_config {
 # Run checks using checksums from a database. We create the database if
 # necessary, and update it with any changed or new checksums.
 #
-# Returns: An array reference containing the files that changed, or undef if
+# Returns: An array reference containing the files that changed if
+# $should_return_checksums is 1, else an empty array reference, or undef if
 # failure. See check_files() for an explanation of the return value.
 sub run {
-	my ($db_file, $hash_method, $config, $should_return_checksums) = @_;
+	my ($db_file, $hash_method, $prune, $config, $should_return_checksums) = @_;
 	if (!defined $db_file || length $db_file == 0 ||
 		!defined $hash_method || length $hash_method == 0 ||
-		!$config) {
+		!defined $prune || !$config) {
 		error("Invalid parameter");
 		return undef;
 	}
@@ -170,13 +171,14 @@ sub run {
 		return undef;
 	}
 
-	my $pruned_count = Checksummer::Database::prune_database($dbh, $start_time);
-	if ($pruned_count == -1) {
-		error("Unable to prune database of deleted files.");
-		return undef;
+	if ($prune) {
+		my $pruned_count = Checksummer::Database::prune_database($dbh, $start_time);
+		if ($pruned_count == -1) {
+			error("Unable to prune database of deleted files.");
+			return undef;
+		}
+		info("Pruned $pruned_count database records.");
 	}
-
-	info("Pruned $pruned_count database records.");
 
 	return $new_checksums;
 }

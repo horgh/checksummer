@@ -436,7 +436,7 @@ sub test_run {
 
 		# Check.
 		my $returned_checksums = Checksummer::run($db_file, $hash_method,
-			$test->{ config }, 1);
+			1, $test->{ config }, 1);
 
 		File::Path::remove_tree($working_dir);
 		unlink $db_file;
