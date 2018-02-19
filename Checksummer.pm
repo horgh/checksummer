@@ -8,7 +8,6 @@ package Checksummer;
 use Checksummer::Database qw//;
 use Checksummer::Util qw/info error debug/;
 use DBI qw//;
-use Exporter qw/import/;
 
 # Read config file to get paths we want to checksum
 #
@@ -146,9 +145,8 @@ sub is_valid_config {
 #
 # Return boolean whether we succeed.
 sub run {
-	my ($db_file, $hash_method, $prune, $config) = @_;
+	my ($db_file, $prune, $config) = @_;
 	if (!defined $db_file || length $db_file == 0 ||
-		!defined $hash_method || length $hash_method == 0 ||
 		!defined $prune || !$config) {
 		error("Invalid parameter");
 		return 0;
@@ -162,8 +160,7 @@ sub run {
 
 	my $start_time = time;
 
-	if (!check_files($dbh, $config->{ paths }, $hash_method,
-			$config->{ exclusions })) {
+	if (!check_files($dbh, $config->{ paths }, $config->{ exclusions })) {
 		error('Failure performing file checks.');
 		return 0;
 	}
@@ -199,15 +196,12 @@ sub run {
 #
 # $paths, array reference. Array of strings which are paths to check.
 #
-# $hash_method, string. sha256 or md5. Which hash function to use.
-#
 # $exclusions, array reference. Array of strings. These are paths to not check.
 #
 # Return boolean whether we succeed.
 sub check_files {
-	my ($dbh, $paths, $hash_method, $exclusions) = @_;
-	if (!$dbh || !$paths || @$paths == 0 || !defined $hash_method ||
-		length $hash_method == 0 || !$exclusions) {
+	my ($dbh, $paths, $exclusions) = @_;
+	if (!$dbh || !$paths || @$paths == 0 || !$exclusions) {
 		error("Invalid parameter");
 		return 0;
 	}
@@ -221,8 +215,7 @@ sub check_files {
 	foreach my $path (@{ $paths }) {
 		info("Checking [$path]...");
 
-		my $path_checksums = check_file($dbh, $statements, $path, $hash_method,
-			$exclusions);
+		my $path_checksums = check_file($dbh, $statements, $path, $exclusions);
 		if (!$path_checksums) {
 			error("Problem checking path: $path");
 			return 0;
@@ -245,8 +238,6 @@ sub check_files {
 # $path, string. Path to the file to check. This function determines how to
 # deal with the file, so it can be any type (directory, regular file, etc).
 #
-# $hash_method, string. sha256 or md5. The hash function to use.
-#
 # $exclusions, array reference. An array of file path prefixes to skip
 # checking.
 #
@@ -268,7 +259,7 @@ sub check_files {
 #
 # - ok (boolean, true if there was no mismatch problem)
 sub check_file {
-	my ($dbh, $statements, $path, $hash_method, $exclusions) = @_;
+	my ($dbh, $statements, $path, $exclusions) = @_;
 
 	# Optimization: I am not checking parameters here any more.
 
@@ -302,7 +293,7 @@ sub check_file {
 			my $full_path = $path . '/' . $file;
 
 			my $file_checksums = check_file($dbh, $statements, $full_path,
-				$hash_method, $exclusions);
+				$exclusions);
 			if (!$file_checksums) {
 				error("Unable to checksum: $full_path");
 				closedir $dh;
@@ -355,8 +346,7 @@ sub check_file {
 		return undef;
 	}
 
-	$info{ checksum } = Checksummer::Util::calculate_checksum($path,
-		$hash_method);
+	$info{ checksum } = Checksummer::Util::calculate_checksum($path);
 	if (!defined $info{ checksum }) {
 		error("Failure building checksum for $path");
 		return undef;

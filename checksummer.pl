@@ -40,8 +40,8 @@ sub main {
 
 	my $start = time;
 
-	my $new_checksums = Checksummer::run($args->{ db_file },
-		$args->{ hash_method }, $args->{ prune }, $config);
+	my $new_checksums = Checksummer::run($args->{ db_file }, $args->{ prune },
+		$config);
 	if (!$new_checksums) {
 		error("Failure running checks.");
 		close($fh);
@@ -66,7 +66,7 @@ sub main {
 
 sub _get_args {
 	my %args;
-	if (!Getopt::Std::getopts('hd:c:m:vp', \%args)) {
+	if (!Getopt::Std::getopts('hd:c:vp', \%args)) {
 		error("Invalid option.");
 		return undef;
 	}
@@ -92,19 +92,6 @@ sub _get_args {
 	}
 	my $config = $args{ c };
 
-	if (!exists $args{ m } || length $args{ m } == 0) {
-		error("Please choose a hash method.");
-		_print_usage();
-		return undef;
-	}
-	my $hash_method = $args{ m };
-
-	if ($hash_method ne 'sha256' && $hash_method ne 'md5') {
-		error("Please select 'sha256' or 'md5' hash method.");
-		_print_usage();
-		return undef;
-	}
-
 	my $debug = 0;
 	if (exists $args{ v }) {
 		$debug = 1;
@@ -118,7 +105,6 @@ sub _get_args {
 	return {
 		db_file     => $db_file,
 		config      => $config,
-		hash_method => $hash_method,
 		debug	      => $debug,
 		prune       => $prune,
 	};
@@ -143,10 +129,9 @@ sub _print_usage {
                    checksum mismatches. You can ignore paths or specific files this way.
                    It is a substring match applied to the beginning of the filename.
 
-    -m <string>    Hash method to use. Either 'sha256' or 'md5'.
-
     [-v]           Enable verbose/debug output.
 
+    [-p]           Prune the database of deleted files as well.
 ";
 }
 

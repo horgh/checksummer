@@ -43,7 +43,7 @@ suspicious.
   monitor. checksummer recursively descends all directories you specify.
 * Run the program. For example:
 
-        perl checksummer.pl -d checksummer.db -c checksummer.conf -m md5
+        perl checksummer.pl -d checksummer.db -c checksummer.conf -p
 
 * It creates the database automatically if it does not exist.
 * Run it periodically, such as from cron, to monitor files.

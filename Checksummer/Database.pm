@@ -6,7 +6,6 @@ use warnings;
 package Checksummer::Database;
 
 use Checksummer::Util qw/info error/;
-use Exporter qw/import/;
 
 sub open_db {
 	my ($file) = @_;

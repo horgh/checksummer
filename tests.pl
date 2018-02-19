@@ -461,7 +461,6 @@ sub test_run {
 	);
 
 	my $db_file = File::Temp::tmpnam();
-	my $hash_method = 'md5';
 	my $working_dir = File::Temp::tmpnam();
 
 	my $failures = 0;
@@ -520,7 +519,7 @@ sub test_run {
 		}
 
 		# Check.
-		my $success = Checksummer::run($db_file, $hash_method, 1, $test->{ config },
+		my $success = Checksummer::run($db_file, 1, $test->{ config },
 			1);
 
 		if ($test->{ want_error }) {
@@ -957,7 +956,6 @@ sub test_util_calculate_checksum {
 		{
 			input       => '123',
 			md5_hash    => '202cb962ac59075b964b07152d234b70',
-			sha256_hash => 'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3',
 		},
 	);
 
@@ -967,7 +965,7 @@ sub test_util_calculate_checksum {
 
 	foreach my $test (@tests) {
 		# The file shouldn't exist yet.
-		my $r = Checksummer::Util::calculate_checksum($tmpfile, 'md5');
+		my $r = Checksummer::Util::calculate_checksum($tmpfile);
 		if (defined $r) {
 			print "test_util_calculate_checksum: Failure: File does not exist, yet received checksum\n";
 			$failures++;
@@ -980,7 +978,7 @@ sub test_util_calculate_checksum {
 			next;
 		}
 
-		$r = Checksummer::Util::calculate_checksum($tmpfile, 'md5');
+		$r = Checksummer::Util::calculate_checksum($tmpfile);
 		if (!defined $r) {
 			print "calculate_checksum($tmpfile, md5): Unable to calculate checksum\n";
 			$failures++;
@@ -996,22 +994,7 @@ sub test_util_calculate_checksum {
 			next;
 		}
 
-		$r = Checksummer::Util::calculate_checksum($tmpfile, 'sha256');
-
 		unlink $tmpfile;
-
-		if (!defined $r) {
-			print "calculate_checksum($tmpfile, sha256): Unable to calculate checksum\n";
-			$failures++;
-			next;
-		}
-
-		$sum = unpack('H*', $r);
-		if ($sum ne $test->{ sha256_hash}) {
-			print "calculate_checksum($tmpfile, sha256) = $sum, wanted $test->{ sha256_hash }\n";
-			$failures++;
-			next;
-		}
 	}
 
 	if ($failures == 0) {

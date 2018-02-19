@@ -7,7 +7,6 @@ use warnings;
 
 use Exporter qw/import/;
 use Digest::MD5 qw//;
-use Digest::SHA qw//;
 use File::stat qw//;
 
 our @EXPORT = qw/info error debug/;
@@ -21,28 +20,11 @@ my $DEBUG = 0;
 #
 # $file, string. The path to the file.
 #
-# $hash_method, string. sha256 or md5. The hash function to use.
-#
 # Returns: A string, the checksum, or undef if failure.
 sub calculate_checksum {
-	my ($file, $hash_method) = @_;
+	my ($file) = @_;
 
 	# Optimization: I am not checking parameters here any more.
-
-	if ($hash_method eq 'sha256') {
-		my $sha = Digest::SHA->new(256);
-
-		# I used to use portable mode (m). Doesn't seem useful.
-
-		# b is binary mode.
-		$sha->addfile($file, 'b');
-
-		# I used to use b64digest, and then hexdigest.
-
-		# I am making an assumption that digest() is faster though, so I use that
-		# now.
-		return $sha->digest;
-	}
 
 	my $md5 = Digest::MD5->new;
 
