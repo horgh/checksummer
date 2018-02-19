@@ -212,28 +212,23 @@ sub check_files {
 		return 0;
 	}
 
+	my $statements = Checksummer::Database::prepare_statements($dbh);
+	if (!$statements) {
+		error("Error preparing database statements");
+		return 0;
+	}
+
 	foreach my $path (@{ $paths }) {
 		info("Checking [$path]...");
 
-		# As a memory optimization, load checksums for files from the database
-		# under each path rather than all checkums at once. Then update the
-		# database with any new checksums under this path, and repeat.
-
-		my $db_records = Checksummer::Database::get_db_records($dbh, $path);
-		if (!$db_records) {
-			error("Unable to load file information from the database.");
-			return 0;
-		}
-
-		my $path_checksums = check_file($dbh, $path, $hash_method, $exclusions,
-			$db_records);
+		my $path_checksums = check_file($dbh, $statements, $path, $hash_method,
+			$exclusions);
 		if (!$path_checksums) {
 			error("Problem checking path: $path");
 			return 0;
 		}
 
-		if (!Checksummer::Database::update_db_records($dbh, $db_records,
-				$path_checksums)) {
+		if (!check_and_update_db($dbh, $statements, $path_checksums)) {
 			error("Unable to perform database updates.");
 			return 0;
 		}
@@ -255,9 +250,6 @@ sub check_files {
 # $exclusions, array reference. An array of file path prefixes to skip
 # checking.
 #
-# $db_records, hash reference. A hash keyed by file path, including the last
-# known checksum and checksum time.
-#
 # Returns: An array reference, or undef if there was a failure.
 #
 # The array may be empty. This can happen if the file/path should be excluded
@@ -276,7 +268,7 @@ sub check_files {
 #
 # - ok (boolean, true if there was no mismatch problem)
 sub check_file {
-	my ($dbh, $path, $hash_method, $exclusions, $db_records) = @_;
+	my ($dbh, $statements, $path, $hash_method, $exclusions) = @_;
 
 	# Optimization: I am not checking parameters here any more.
 
@@ -309,8 +301,8 @@ sub check_file {
 
 			my $full_path = $path . '/' . $file;
 
-			my $file_checksums = check_file($dbh, $full_path, $hash_method,
-				$exclusions, $db_records);
+			my $file_checksums = check_file($dbh, $statements, $full_path,
+				$hash_method, $exclusions);
 			if (!$file_checksums) {
 				error("Unable to checksum: $full_path");
 				closedir $dh;
@@ -322,8 +314,7 @@ sub check_file {
 			# Batch database updates. Doing smaller batches here rather than only in
 			# check_files() allows lower memory use.
 			if (@dir_checksums >= 1000) {
-				if (!Checksummer::Database::update_db_records($dbh, $db_records,
-						\@dir_checksums)) {
+				if (!check_and_update_db($dbh, $statements, \@dir_checksums)) {
 					error("Error updating the database");
 					closedir $dh;
 					return undef;
@@ -344,17 +335,13 @@ sub check_file {
 		return [];
 	}
 
-	# At this point we are dealing with a regular file. Calculate its checksum and
-	# potentially raise a warning if there is a problematic mismatch.
+	# This is a regular file. Gather information about it.
 
-	# Gather the newest information about the file. We fill the fields in as we
-	# go.
 	my %info = (
 		file          => $path,
 		checksum      => undef,
 		checksum_time => undef,
 		modified_time => undef,
-		ok            => 1,
 	);
 
 	# Record the current time prior to calculating the checksum. We use this both
@@ -375,33 +362,108 @@ sub check_file {
 		return undef;
 	}
 
-	# Is the file not in the database? Add it. This is the first time we've seen
-	# the file.
-	if (!exists $db_records->{ $path }) {
-		debug('debug', "No checksum found in database for $path, adding");
-		return [ \%info ];
-	}
-
-	# If the checksums match then there is nothing to do.
-	if ($info{ checksum } eq $db_records->{ $path }{ checksum }) {
-		return [ \%info ];
-	}
-
-	# Decide whether this mismatch is a problem or not. Report if it is.
-	my $mismatch_result = checksum_mismatch($path, $db_records->{ $path },
-		$info{ modified_time });
-	if ($mismatch_result == -1) {
-		error("Problem checking checksum mismatch status for $path");
-		return undef;
-	}
-
-	if ($mismatch_result == 0) {
-		return [ \%info ];
-	}
-
-	# The mismatch looks problematic.
-	$info{ ok } = 0;
 	return [ \%info ];
+}
+
+sub check_and_update_db {
+	my ($dbh, $statements, $checksums) = @_;
+
+	my @inserts;
+	my @updates;
+	foreach my $checksum (@$checksums) {
+		if (!$statements->{select}->execute($checksum->{file})) {
+			error("Error executing SELECT for " . $checksum->{file} . ": " .
+				$statements->{select}->errstr);
+			return 0;
+		}
+		my $rows = $statements->{select}->fetchall_arrayref;
+		if ($statements->{select}->err) {
+			error("Error retrieving rows for " . $checksum->{file} . " (2): " .
+				$statements->{select}->errstr);
+			return 0;
+		}
+
+		if (@$rows == 0) {
+			$checksum->{ok} = 1;
+			push @inserts, $checksum;
+			next;
+		}
+		if (@$rows != 1) {
+			error("Unexpected number of rows: " . scalar(@$rows));
+			return 0;
+		}
+
+		my %db_record = (
+			file          => $rows->[0][0],
+			checksum      => $rows->[0][1],
+			checksum_time => $rows->[0][2],
+			modified_time => $rows->[0][3],
+		);
+
+		if ($checksum->{checksum} eq $db_record{checksum}) {
+			$checksum->{ok} = 1;
+			push @updates, $checksum;
+			next;
+		}
+
+		my $mismatch_result = checksum_mismatch($checksum->{file}, \%db_record,
+			$checksum->{modified_time});
+		if ($mismatch_result == -1) {
+			error("Problem checking checksum mismatch status for " .
+				$checksum->{file});
+			return 0;
+		}
+
+		if ($mismatch_result == 0) {
+			$checksum->{ok} = 1;
+		} else {
+			$checksum->{ok} = 0;
+		}
+		push @updates, $checksum;
+	}
+
+	if (@inserts == 0 && @updates == 0) {
+		return 1;
+	}
+
+	# Use a transaction for speed.
+	if (!$dbh->begin_work) {
+		error("Unable to start transaction: " . $dbh->errstr);
+		return 0;
+	}
+
+	foreach my $checksum (@inserts) {
+		if (!$statements->{insert}->execute(
+				$checksum->{file},
+				$checksum->{checksum},
+				$checksum->{checksum_time},
+				$checksum->{modified_time},
+				$checksum->{ok})) {
+			error("Error inserting row: " . $statements->{insert}->errstr);
+			$dbh->rollback;
+			return 0;
+		}
+	}
+
+	foreach my $checksum (@updates) {
+		if (!$statements->{update}->execute(
+				$checksum->{checksum},
+				$checksum->{checksum_time},
+				$checksum->{modified_time},
+				$checksum->{ok},
+				$checksum->{file})) {
+			error("Error updating row: " . $statements->{update}->errstr);
+			$dbh->rollback;
+			return 0;
+		}
+	}
+
+	if (!$dbh->commit) {
+		error("Unable to commit transaction: " . $dbh->errstr);
+		return 0;
+	}
+
+	return 1;
 }
 
 # Some paths/files are excluded by the config (prefixed with !).
@@ -432,7 +494,6 @@ sub is_file_excluded {
 # $file, string. The file's path
 #
 # $db_record, hash reference. Information from the database about the file.
-# See get_db_records() for what is in it.
 #
 # $current_mtime, integer. The modified time (unixtime) of the file right now.
 #

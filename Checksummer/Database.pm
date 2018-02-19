@@ -130,86 +130,21 @@ sub table_exists {
 	return 0;
 }
 
-# Load all current records about files from the database.
-#
-# Keyed by file path.
-#
-# I'm doing this up front as an optimization.
-#
-# Parameters:
-#
-# $dbh, DBI object.
-#
-# Returns: A hash reference, or undef if failure.
-#
-# The hash will have keys that are filenames. The values will be a hash
-# reference with keys checksum and checksum_time.
-sub get_db_records {
-	my ($dbh, $path) = @_;
+sub prepare_statements {
+	my ($dbh) = @_;
 	if (!$dbh) {
-		error("You must provide a database handle");
+		error("Invalid argument");
 		return undef;
 	}
 
-	# Let path be empty. This retrieves all.
-	$path = '' if !defined $path;
-
-	my $path_sql = escape_like_parameter($path);
-	$path_sql .= '/%';
-
-	my $sql = q/
+	my $select_sql = q/
 	SELECT file, checksum, checksum_time, modified_time
-	FROM checksums
-	WHERE file LIKE ? ESCAPE '\\'
-	/;
-	my @params = ($path_sql);
-
-	my $rows = db_select($dbh, $sql, \@params);
-	if (!$rows) {
-		error("Select failure");
+	FROM checksums WHERE file = ?
+/;
+	my $select_sth = $dbh->prepare($select_sql);
+	if (!$select_sth) {
+		error("Error preparing SELECT statement: " . $dbh->errstr);
 		return undef;
-	}
-
-	my %checksums;
-
-	foreach my $row (@{ $rows }) {
-		$checksums{ $row->[0] } = {
-			checksum      => $row->[1],
-			checksum_time => $row->[2],
-			modified_time => $row->[3],
-		};
-	}
-
-	return \%checksums;
-}
-
-# LIKE treats certain characters specially. Escape them.
-#
-# This assumes the escape character is \.
-sub escape_like_parameter {
-	my ($s) = @_;
-	if (!defined $s) {
-		return '';
-	}
-
-	$s =~ s/\\/\\\\/g;
-	$s =~ s/_/\\_/g;
-	$s =~ s/%/\\%/g;
-
-	return $s;
-}
-
-# Bulk INSERT/UPDATE the database with the files and checksums we have found
-# either new or changed.
-sub update_db_records {
-	my ($dbh, $old_records, $new_records) = @_;
-	if (!$dbh || !$old_records|| !$new_records) {
-		error("Invalid parameter");
-		return 0;
-	}
-
-	if (@$new_records == 0) {
-		return 1;
 	}
 
 	my $insert_sql = q/
@@ -217,71 +152,28 @@ sub update_db_records {
 	(file, checksum, checksum_time, modified_time, ok)
 	VALUES(?, ?, ?, ?, ?)
 /;
+	my $insert_sth = $dbh->prepare($insert_sql);
+	if (!$insert_sth) {
+		error("Error preparing INSERT statement: " . $dbh->errstr);
+		return undef;
+	}
 
 	my $update_sql = q/
 	UPDATE checksums
 	SET checksum = ?, checksum_time = ?, modified_time = ?, ok = ?
 	WHERE file = ?
 /;
-
-	my $insert_sth = $dbh->prepare($insert_sql);
-	if (!$insert_sth) {
-		error("Failure preparing SQL: $insert_sql: " . $dbh->errstr);
-		return 0;
-	}
-
 	my $update_sth = $dbh->prepare($update_sql);
 	if (!$update_sth) {
-		error("Failure preparing SQL: $update_sql: " . $dbh->errstr);
-		return 0;
+		error("Error preparing UPDATE statement: " . $dbh->errstr);
+		return undef;
 	}
 
-	# Use a transaction for faster bulk inserts.
-	if (!$dbh->begin_work) {
-		error("Unable to start transaction: " . $dbh->errstr);
-		return 0;
-	}
-
-	foreach my $c (@{ $new_records }) {
-		if (!exists $c->{ file } ||
-			!exists $c->{ checksum } ||
-			!exists $c->{ checksum_time } ||
-			!exists $c->{ modified_time } ||
-			!exists $c->{ok}) {
-			error("Record is missing a field");
-			$dbh->rollback;
-			return 0;
-		}
-
-		if (exists $old_records->{ $c->{ file } }) {
-			my $update_res = $update_sth->execute($c->{ checksum },
-				$c->{ checksum_time }, $c->{ modified_time}, $c->{ ok }, $c->{ file });
-			if (!defined $update_res) {
-				error("Unable to update database for file $c->{ file }: "
-					. $update_sth->errstr);
-				$dbh->rollback;
-				return 0;
-			}
-
-			next;
-		}
-
-		my $insert_res = $insert_sth->execute($c->{ file }, $c->{ checksum },
-			$c->{ checksum_time }, $c->{ modified_time }, $c->{ ok });
-		if (!defined $insert_res) {
-			error("Unable to insert into database for file $c->{ file }: " .
-				$insert_sth->errstr);
-			$dbh->rollback;
-			return 0;
-		}
-	}
-
-	if (!$dbh->commit) {
-		error("Unable to commit transaction: " . $dbh->errstr);
-		return 0;
-	}
-
-	return 1;
+	return {
+		select => $select_sth,
+		insert => $insert_sth,
+		update => $update_sth,
+	};
 }
 
 # We just recomputed checksums for all files that currently exist. There may be

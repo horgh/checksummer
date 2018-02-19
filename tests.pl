@@ -51,10 +51,6 @@ sub test_checksummer {
 		$failures++;
 	}
 
-	if (!test_check_file()) {
-		$failures++;
-	}
-
 	if (!test_is_file_excluded()) {
 		$failures++;
 	}
@@ -264,10 +260,10 @@ sub test_run {
 				},
 			],
 			files => [
-				{ path => '/dir1',          exists => 1, dir     => 1 },
-				{ path => '/dir1/test.txt', exists => 1, content => '123' },
-				{ path => '/dir2',          exists => 1, dir     => 1 },
-				{ path => '/dir2/test.txt', exists => 1, content => '123' },
+				{ path => '/dir1',          dir     => 1 },
+				{ path => '/dir1/test.txt', content => '123' },
+				{ path => '/dir2',          dir     => 1 },
+				{ path => '/dir2/test.txt', content => '123' },
 			],
 			# Currently a subset of columns.
 			db_records_after => [
@@ -287,10 +283,10 @@ sub test_run {
 			db_records => [
 			],
 			files => [
-				{ path => '/dir1',          exists => 1, dir     => 1 },
-				{ path => '/dir1/test.txt', exists => 1, content => '123' },
-				{ path => '/dir2',          exists => 1, dir     => 1 },
-				{ path => '/dir2/test.txt', exists => 1, content => '123' },
+				{ path => '/dir1',          dir     => 1 },
+				{ path => '/dir1/test.txt', content => '123' },
+				{ path => '/dir2',          dir     => 1 },
+				{ path => '/dir2/test.txt', content => '123' },
 			],
 			# Currently a subset of columns.
 			db_records_after => [
@@ -325,11 +321,10 @@ sub test_run {
 				},
 			],
 			files => [
-				{ path => '/dir1',          exists => 1, dir     => 1 },
-				{ path => '/dir1/test.txt', exists => 1, content => '123' },
-				{ path => '/dir2',          exists => 1, dir     => 1 },
-				{ path => '/dir2/test.txt', exists => 1, content => '123',
-					mtime => 6, },
+				{ path => '/dir1',          dir     => 1 },
+				{ path => '/dir1/test.txt', content => '123' },
+				{ path => '/dir2',          dir     => 1 },
+				{ path => '/dir2/test.txt', content => '123', mtime => 6, },
 			],
 			# Currently a subset of columns.
 			db_records_after => [
@@ -364,16 +359,102 @@ sub test_run {
 				},
 			],
 			files => [
-				{ path => '/dir1',          exists => 1, dir     => 1 },
-				{ path => '/dir1/test.txt', exists => 1, content => '123' },
-				{ path => '/dir2',          exists => 1, dir     => 1 },
-				{ path => '/dir2/test.txt', exists => 1, content => '123',
-					mtime => 4 },
+				{ path => '/dir1',          dir     => 1 },
+				{ path => '/dir1/test.txt', content => '123' },
+				{ path => '/dir2',          dir     => 1 },
+				{ path => '/dir2/test.txt', content => '123', mtime => 4 },
 			],
 			# Currently a subset of columns.
 			db_records_after => [
 				{ file => '/dir1/test.txt', checksum => $binary_md5sum_of_123, ok => 1 },
 				{ file => '/dir2/test.txt', checksum => $binary_md5sum_of_123, ok => 0 },
+			],
+			want_error => 0,
+		},
+
+		# Regular file. Checksum mismatch, and the mtime is prior to the last we
+		# know about. This is problematic.
+		{
+			desc   => 'checksum mismatch, mtime is before, and not ok',
+			config => {
+				paths      => ['/dir1'],
+				exclusions => [],
+			},
+			db_records => [
+				{
+					file          => '/dir1/test.txt',
+					checksum      => 'ff',
+					checksum_time => 10,
+					modified_time => 6,
+					ok            => 1,
+				},
+			],
+			files => [
+				{
+					path => '/dir1',
+					dir  => 1,
+				},
+				{
+					path    => '/dir1/test.txt',
+					mtime   => 5,
+					content => "123",
+				},
+			],
+			db_records_after => [
+				{
+					file     => '/dir1/test.txt',
+					checksum => pack('H*', '202cb962ac59075b964b07152d234b70'),
+					ok       => 0,
+				},
+			],
+			want_error => 0,
+		},
+
+		# Symlink. It should be skipped.
+		{
+			desc   => 'symlink',
+			config => {
+				paths      => ['/dir1'],
+				exclusions => [],
+			},
+			db_records => [
+			],
+			files => [
+				{
+					path => '/dir1',
+					dir  => 1,
+				},
+				{
+					path    => '/dir1/testlink',
+					symlink => 1,
+				},
+			],
+			db_records_after => [
+			],
+			want_error => 0,
+		},
+
+		# A file is not in the database, and it's excluded. We should not see a
+		# checksum for it.
+		{
+			desc   => 'file is excluded',
+			config => {
+				paths      => ['/dir1'],
+				exclusions => ['/dir1/test.txt'],
+			},
+			db_records => [
+			],
+			files => [
+				{
+					path => '/dir1',
+					dir  => 1,
+				},
+				{
+					path => '/dir1/test.txt',
+					dir  => 1,
+				},
+			],
+			db_records_after => [
 			],
 			want_error => 0,
 		},
@@ -397,11 +478,6 @@ sub test_run {
 			next;
 		}
 
-		# Pretend nothing is in the database. Well we don't have to pretend! But the
-		# function relies on a hash of files => checksums to check whether to
-		# insert/update.
-		my $current_checksums = {};
-
 		# Prepend all paths to set in the db with the working dir. This is what
 		# we'll see when we run checks shortly.
 		for (my $i = 0; $i < @{ $test->{ db_records } }; $i++) {
@@ -409,8 +485,7 @@ sub test_run {
 				$working_dir . $test->{ db_records }[ $i ]{ file };
 		}
 
-		if (!Checksummer::Database::update_db_records($dbh, $current_checksums,
-				$test->{ db_records })) {
+		if (!_insert_db_records($dbh, $test->{db_records})) {
 			print "test_run: Unable to perform database updates.\n";
 			$failures++;
 			unlink $db_file;
@@ -447,7 +522,6 @@ sub test_run {
 		# Check.
 		my $success = Checksummer::run($db_file, $hash_method, 1, $test->{ config },
 			1);
-
 
 		if ($test->{ want_error }) {
 			if ($success) {
@@ -531,498 +605,6 @@ sub test_run {
 	return 0;
 }
 
-sub test_check_file {
-	my @tests = (
-		# The file does not exist. No error as we check if the file is readable and
-		# currently we do not raise an error if it is not.
-		{
-			desc  => 'file does not exist',
-			file  => '/test.txt',
-			files => [
-				{
-					path   => '/test.txt',
-				},
-			],
-			db_records => {},
-			exclusions => [],
-			want_error => 0,
-			output     => [],
-		},
-
-		# Regular file. Checksums match.
-		{
-			desc  => 'checksums match',
-			file  => '/test.txt',
-			files => [
-				{
-					path    => '/test.txt',
-					exists  => 1,
-					mtime   => 1,
-					content => "123",
-				},
-			],
-			db_records => {
-				'/test.txt' => {
-					# checksum of 123
-					checksum      => '202cb962ac59075b964b07152d234b70',
-					checksum_time => 1,
-					modified_time => 1,
-				},
-			},
-			exclusions => [],
-			want_error => 0,
-			output     => [
-				{
-					file     => '/test.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-			],
-		},
-
-		# Regular file. Checksum is not yet in the database.
-		{
-			desc  => 'checksum is not in database',
-			file  => '/test.txt',
-			files => [
-				{
-					path    => '/test.txt',
-					exists  => 1,
-					mtime   => 1,
-					content => "123",
-				},
-			],
-			db_records => {
-			},
-			exclusions => [],
-			want_error => 0,
-			output     => [
-				{
-					file     => '/test.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-			],
-		},
-
-		# Regular file. Checksum mismatch, but it's ok. The modified time is after
-		# the last we know about.
-		{
-			desc  => 'checksum mismatch, but ok',
-			file  => '/test.txt',
-			files => [
-				{
-					path    => '/test.txt',
-					exists  => 1,
-					mtime   => 5,
-					content => "123",
-				},
-			],
-			db_records => {
-				'/test.txt' => {
-					checksum      => 'ff',
-					checksum_time => 4,
-					modified_time => 4,
-				},
-			},
-			exclusions => [],
-			want_error => 0,
-			output     => [
-				{
-					file     => '/test.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-			],
-		},
-
-		# Regular file. Checksum mismatch, and the mtime is prior to the last we
-		# know about. This is problematic.
-		{
-			desc  => 'checksum mismatch, and not ok',
-			file  => '/test.txt',
-			files => [
-				{
-					path    => '/test.txt',
-					exists  => 1,
-					mtime   => 5,
-					content => "123",
-				},
-			],
-			db_records => {
-				'/test.txt' => {
-					checksum      => 'ff',
-					checksum_time => 10,
-					modified_time => 6,
-				},
-			},
-			exclusions => [],
-			want_error => 0,
-			output     => [
-				{
-					file     => '/test.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 0,
-				},
-			],
-		},
-
-		# Directory. All file checksums match.
-		{
-			desc  => 'directory, all checksums match',
-			file  => '/testdir',
-			files => [
-				{
-					path    => '/testdir',
-					dir     => 1,
-					exists  => 1,
-				},
-				{
-					path    => '/testdir/test.txt',
-					exists  => 1,
-					mtime   => 5,
-					content => "123",
-				},
-				{
-					path    => '/testdir/test2.txt',
-					exists  => 1,
-					mtime   => 6,
-					content => "123",
-				},
-			],
-			db_records => {
-				'/testdir/test.txt' => {
-					checksum      => '202cb962ac59075b964b07152d234b70',
-					checksum_time => 5,
-					modified_time => 5,
-				},
-				'/testdir/test2.txt' => {
-					checksum      => '202cb962ac59075b964b07152d234b70',
-					checksum_time => 6,
-					modified_time => 6,
-				},
-			},
-			exclusions => [],
-			want_error => 0,
-			output     => [
-				{
-					file     => '/testdir/test.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-				{
-					file     => '/testdir/test2.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-			],
-		},
-
-		# Directory. All file checksums match, one is not in the database.
-		{
-			desc  => 'directory, all checksums match, one not in database',
-			file  => '/testdir',
-			files => [
-				{
-					path    => '/testdir',
-					dir     => 1,
-					exists  => 1,
-				},
-				{
-					path    => '/testdir/test.txt',
-					exists  => 1,
-					mtime   => 5,
-					content => "123",
-				},
-				{
-					path    => '/testdir/test2.txt',
-					exists  => 1,
-					mtime   => 6,
-					content => "123",
-				},
-				{
-					path    => '/testdir/test3.txt',
-					exists  => 1,
-					mtime   => 7,
-					content => "123",
-				},
-			],
-			db_records => {
-				'/testdir/test.txt' => {
-					checksum      => '202cb962ac59075b964b07152d234b70',
-					checksum_time => 5,
-					modified_time => 5,
-				},
-				'/testdir/test2.txt' => {
-					checksum      => '202cb962ac59075b964b07152d234b70',
-					checksum_time => 6,
-					modified_time => 6,
-				},
-			},
-			exclusions => [],
-			want_error => 0,
-			output     => [
-				{
-					file     => '/testdir/test.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-				{
-					file     => '/testdir/test2.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-				{
-					file     => '/testdir/test3.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-			],
-		},
-
-		# Directory. All file checksums match except one. The file changed since we
-		# last saw it, so it is okay.
-		{
-			desc  => 'directory, checksums match except one different but ok',
-			file  => '/testdir',
-			files => [
-				{
-					path   => '/testdir',
-					dir    => 1,
-					exists => 1,
-				},
-				{
-					path    => '/testdir/test.txt',
-					exists  => 1,
-					mtime   => 5,
-					content => "123",
-				},
-				{
-					path    => '/testdir/test2.txt',
-					exists  => 1,
-					mtime   => 6,
-					content => "123",
-				},
-			],
-			db_records => {
-				'/testdir/test.txt' => {
-					checksum      => '202cb962ac59075b964b07152d234b70',
-					checksum_time => 5,
-					modified_time => 5,
-				},
-				'/testdir/test2.txt' => {
-					checksum      => 'ff',
-					checksum_time => 5,
-					modified_time => 5,
-				},
-			},
-			exclusions => [],
-			want_error => 0,
-			output     => [
-				{
-					file     => '/testdir/test.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-				{
-					file     => '/testdir/test2.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-			],
-		},
-
-		# Directory. All file checksums match except one, and its mtime is the same
-		# as the last time. This is a problem.
-		{
-			desc  => 'directory, one checksum different, and it is a problem',
-			file  => '/testdir',
-			files => [
-				{
-					path   => '/testdir',
-					dir    => 1,
-					exists => 1,
-				},
-				{
-					path    => '/testdir/test.txt',
-					exists  => 1,
-					mtime   => 5,
-					content => "123",
-				},
-				{
-					path    => '/testdir/test2.txt',
-					exists  => 1,
-					mtime   => 6,
-					content => "123",
-				},
-			],
-			db_records => {
-				'/testdir/test.txt' => {
-					checksum      => '202cb962ac59075b964b07152d234b70',
-					checksum_time => 5,
-					modified_time => 5,
-				},
-				'/testdir/test2.txt' => {
-					checksum      => 'ff',
-					checksum_time => 10,
-					modified_time => 6,
-				},
-			},
-			exclusions => [],
-			want_error => 0,
-			output     => [
-				{
-					file     => '/testdir/test.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-				{
-					file     => '/testdir/test2.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 0,
-				},
-			],
-		},
-
-		# Symlink. It should be skipped.
-		{
-			desc  => 'symlink',
-			file  => '/testlink',
-			files => [
-				{
-					path    => '/testlink',
-					symlink => 1,
-					exists  => 1,
-				},
-			],
-			db_records => {
-			},
-			exclusions => [],
-			want_error => 0,
-			output     => [
-			],
-		},
-
-		# A file is not in the database, and it's excluded. We should not see a
-		# checksum for it.
-		{
-			desc  => 'file is excluded',
-			file  => '/testdir',
-			files => [
-				{
-					path   => '/testdir',
-					dir    => 1,
-					exists => 1,
-				},
-				{
-					path    => '/testdir/test.txt',
-					exists  => 1,
-					mtime   => 5,
-					content => "123",
-				},
-				{
-					path    => '/testdir/test2.txt',
-					exists  => 1,
-					mtime   => 6,
-					content => "123",
-				},
-			],
-			db_records => {
-				'/testdir/test.txt' => {
-					checksum      => '202cb962ac59075b964b07152d234b70',
-					checksum_time => 5,
-					modified_time => 5,
-				},
-			},
-			exclusions => ['/testdir/test2.txt'],
-			want_error => 0,
-			output     => [
-				{
-					file     => '/testdir/test.txt',
-					checksum => '202cb962ac59075b964b07152d234b70',
-					ok       => 1,
-				},
-			],
-		},
-	);
-
-	my $working_dir = File::Temp::tmpnam();
-	my $hash_method = 'md5';
-
-	my $failures = 0;
-
-	foreach my $test (@tests) {
-		print "test_check_file: Running test $test->{ desc }...\n";
-
-		if (!populate_directory($working_dir, $test->{ files })) {
-			print "test_check_file: Unable to create test files\n";
-			$failures++;
-			next;
-		}
-
-		# We need to prefix the files for the database with the working directory.
-		# We also must convert the checksum from hex to binary.
-		my %db_records;
-		foreach my $file (keys %{ $test->{ db_records } }) {
-			my $path = $working_dir . $file;
-			my $checksum = pack('H*', $test->{ db_records }{ $file }{ checksum });
-
-			$db_records{ $path } = {
-				checksum      => $checksum,
-				checksum_time => $test->{ db_records }{ $file }{ checksum_time },
-				modified_time => $test->{ db_records }{ $file }{ modified_time },
-			};
-		}
-
-		# Prefix exclusions with the working dir path.
-		my @exclusions;
-		foreach my $exclusion (@{ $test->{ exclusions } }) {
-			my $path = $working_dir . $exclusion;
-			push @exclusions, $path;
-		}
-
-		# 'file' is the file we start checking from. It might be a regular file or
-		# it might be a directory. In either case, we have to prefix what the test
-		# said with the working directory.
-		my $start_file = $working_dir . $test->{ file };
-
-		# TODO(horgh): Test using $dbh in check_file().
-		my $dbh;
-		my $r = Checksummer::check_file($dbh, $start_file, $hash_method,
-			\@exclusions, \%db_records);
-		File::Path::remove_tree($working_dir);
-
-		if ($test->{ want_error }) {
-			if (defined $r) {
-				print "test_check_file: wanted error, but received result\n";
-				$failures++;
-				next;
-			}
-
-			next;
-		}
-
-		if (!defined $r) {
-			print "test_check_file: returned error\n";
-			$failures++;
-			next;
-		}
-
-		if (!checksums_are_equal($working_dir, $test->{ output }, $r)) {
-			print "test_check_file: returned checksums are not as expected\n";
-			$failures++;
-			next;
-		}
-	}
-
-	if ($failures == 0) {
-		return 1;
-	}
-
-	print "$failures/" . (scalar(@tests)) . " test_check_file tests failed\n";
-	return 0;
-}
-
 # Create and populate a given directory with file(s) specified.
 #
 # Several parts of checksummer rely on interacting with files on disk. It is
@@ -1035,7 +617,6 @@ sub test_check_file {
 #   function takes care of that. This is required.
 # - dir, boolean, whether the file should be a directory. Optional. Default 0.
 # - symlink, boolean, whether the file should be a symlink. Optional. Default 0.
-# - exists, boolean, whether to create the file at all. Optional. Default 0.
 # - mtime, numeric, unixtime, the modified time to set on a file. Optional.
 #   Default 0.
 # - content, string, the content to put in the file if it is a regular file.
@@ -1053,10 +634,6 @@ sub populate_directory {
 	}
 
 	foreach my $file (@{ $files }) {
-		if (!$file->{ exists }) {
-			next;
-		}
-
 		my $path = $working_dir . $file->{ path };
 
 		if ($file->{ symlink }) {
@@ -1096,57 +673,6 @@ sub populate_directory {
 			utime($file->{ mtime }, $file->{ mtime }, $path) != 1) {
 			print "populate_directory: Unable to set mtime: $path\n";
 			File::Path::remove_tree($working_dir);
-			return 0;
-		}
-	}
-
-	return 1;
-}
-
-# Compare the set of checksums returned from running checks with those
-# specified in test information.
-sub checksums_are_equal {
-	my ($working_dir, $test_checksums, $returned_checksums) = @_;
-	if (!defined $working_dir || length $working_dir == 0 ||
-		!$test_checksums || !$returned_checksums) {
-		print "checksums_are_equal: Invalid parameter\n";
-		return 0;
-	}
-
-	# Compare the checksums we received (remember, only those files changed or
-	# are new are returned) with what we expected to be returned.
-
-	if (@{ $returned_checksums } != @{ $test_checksums }) {
-		print "checksums_are_equal: " . scalar(@{ $returned_checksums })
-		. " checksums returned, wanted " . scalar(@{ $test_checksums }) . "\n";
-		return 0;
-	}
-
-	my @sorted_returned_checksums = sort { $a->{ file } cmp $b->{ file } }
-		@{ $returned_checksums };
-
-	for (my $i = 0; $i < @{ $test_checksums }; $i++) {
-		my $wanted = $test_checksums->[ $i ];
-		my $got = $sorted_returned_checksums[ $i ];
-
-		my $wanted_file = $working_dir . $wanted->{ file };
-		if ($got->{ file } ne $wanted_file) {
-			print "checksums_are_equal: file $i file is $got->{ file }, wanted $wanted_file\n";
-			return 0;
-		}
-
-		my $got_sum = unpack('H*', $got->{ checksum });
-		if ($got_sum ne $wanted->{ checksum }) {
-			print "checksums_are_equal: file $i checksum is $got_sum, wanted $wanted->{ checksum }\n";
-			return 0;
-		}
-
-		# We shouldn't need to compare the checksum_time fields. This is because
-		# each time we calculate them, the time will be 'now', so the time we
-		# received will always be the current time.
-
-		if ($got->{ ok } != $wanted->{ ok }) {
-			print "checksums_are_equal: file $i ok is $got->{ ok }, wanted $wanted->{ ok }\n";
 			return 0;
 		}
 	}
@@ -1245,10 +771,6 @@ sub test_checksum_mismatch {
 sub test_database {
 	my $failures = 0;
 
-	if (!test_escape_like_parameter()) {
-		$failures++;
-	}
-
 	if (!test_prune_database()) {
 		$failures++;
 	}
@@ -1343,9 +865,7 @@ sub test_prune_database {
 			return undef;
 		}
 
-		my $current_checksums = {};
-		if (!Checksummer::Database::update_db_records($dbh, $current_checksums,
-				$test->{ records_before })) {
+		if (!_insert_db_records($dbh, $test->{ records_before })) {
 			print "test_prune_database: Unable to perform database updates.\n";
 			$failures++;
 			unlink $db_file;
@@ -1362,33 +882,38 @@ sub test_prune_database {
 			next;
 		}
 
-		my $records = Checksummer::Database::get_db_records($dbh, '');
+		my $records = get_all_db_records($dbh);
+		if (!$records) {
+			print "test_prune_database: error retrieving records\n";
+			$failures++;
+			unlink $db_file;
+			next;
+		}
 
 		unlink $db_file;
 
-		if (!$records) {
-			print "test_prune_database: unable to retrieve records\n";
+		if (scalar(@$records) != keys(%{ $test->{ records_after } })) {
+			print "test_prune_database: unexpected number of records after test, wanted "
+				. scalar(keys(%{ $test->{ records_after } })) . ", got "
+				. scalar(@$records) . "\n";
 			$failures++;
 			next;
 		}
 
-		if (scalar(keys(%{ $records })) != scalar(keys(%{ $test->{ records_after } }))) {
-			print "test_prune_database: unexpected number of records after test, wanted "
-				. scalar(keys(%{ $test->{ records_after } })) . ", got "
-				. scalar(keys(%{ $records })) . "\n";
-			$failures++;
-			next;
+		my %file_to_record;
+		foreach my $record (@$records) {
+			$file_to_record{$record->{file}} = $record;
 		}
 
 		foreach my $key (keys %{ $test->{ records_after } }) {
-			if (!exists $records->{ $key }) {
+			if (!exists $file_to_record{ $key }) {
 				print "FAILURE: prune_database(): record for file not found: $key\n";
 				$failures++;
 				next TEST;
 			}
 
 			my $wanted = $test->{ records_after }{ $key };
-			my $got = $records->{ $key };
+			my $got = $file_to_record{ $key };
 
 			if ($wanted->{ checksum } ne $got->{ checksum }) {
 				print "FAILURE: prune_database(): record after: $key: checksum = $got->{ checksum }, wanted $wanted->{ checksum }\n";
@@ -1409,45 +934,6 @@ sub test_prune_database {
 	}
 
 	print "$failures/" . scalar(@tests) . " prune_database tests failed\n";
-	return 0;
-}
-
-sub test_escape_like_parameter {
-	my @tests = (
-		{
-			input  => 'abc',
-			output => 'abc',
-		},
-		{
-			input  => 'ab%_\\c',
-			output => 'ab\\%\\_\\\\c',
-		},
-		{
-			input  => '%_\\',
-			output => '\\%\\_\\\\',
-		},
-		{
-			input  => '%_\\%_\\',
-			output => '\\%\\_\\\\\\%\\_\\\\',
-		},
-	);
-
-	my $failures = 0;
-
-	foreach my $test (@tests) {
-		my $output = Checksummer::Database::escape_like_parameter($test->{ input });
-		if ($output ne $test->{ output }) {
-			print "FAILURE: escape_like_parameter($test->{ input }) = $output, wanted $test->{ output }\n";
-			$failures++;
-			next
-		}
-	}
-
-	if ($failures == 0) {
-		return 1;
-	}
-
-	print "TEST FAILURES: $failures/" . scalar(@tests) . " escape_like_parameter tests failed\n";
 	return 0;
 }
 
@@ -1605,7 +1091,7 @@ sub get_all_db_records {
 	id, file, checksum, checksum_time, modified_time, ok
 	FROM checksums
 	ORDER BY file
-	/;
+/;
 	my @params;
 
 	my $rows = Checksummer::Database::db_select($dbh, $sql, \@params);
@@ -1628,6 +1114,35 @@ sub get_all_db_records {
 	}
 
 	return \@records;
+}
+
+sub _insert_db_records {
+	my ($dbh, $records) = @_;
+	if (!$dbh || !$records) {
+		print "_insert_db_records: Invalid argument\n";
+		return 0;
+	}
+
+	my $sql = q/
+	INSERT INTO checksums
+	(file, checksum, checksum_time, modified_time, ok)
+	VALUES(?, ?, ?, ?, ?)
+/;
+	foreach my $record (@$records) {
+		if (!$dbh->do(
+				$sql,
+				undef,
+				$record->{file},
+				$record->{checksum},
+				$record->{checksum_time},
+				$record->{modified_time},
+				$record->{ok})) {
+			print "_insert_db_records: Error inserting: " . $dbh->errstr . "\n";
+			return 0;
+		}
+	}
+
+	return 1;
 }
 
 exit(main() ? 0 : 1);
